@@ -160,6 +160,8 @@ ON聚焦比较沿用原两项Holm族；Qwen沿用OFF、ON及ON−OFF的三项Hol
 
 英文正文为`paper_interface_focus/main.tex`，英文附录为`supplement.tex`；中文为`paper_zh_direct/main.tex`。它们共享`paper_zh_direct/figures/`的正式图。复现输出保留在`reproduct/`，不覆盖正式图；发布时正式图已经同步为两条件版本。
 
+仓库提供编译后的[英文正文](paper_interface_focus/main.pdf)、[英文附录](paper_interface_focus/supplement.pdf)和[中文论文](paper_zh_direct/main.pdf)，各保存一份正式PDF。
+
 安装Tectonic或XeLaTeX后，在对应论文目录编译；中文需要SimSun/SimHei/KaiTi/FangSong，英文使用Times New Roman/Arial/Consolas。首次Tectonic编译可能下载TeX包，`--only-cached`只适用于缓存齐全时。
 
 ```powershell
@@ -178,3 +180,5 @@ tectonic main.tex
 ```
 
 记录审计检验请求/源码/封存哈希、父代复用、回退算术和选择重建；完整复现将重新计算的种群向量、均值和区间与正式汇总逐项比较。输入清单`results/reproduction/INPUT_MANIFEST.json`在流程前后均核验。图形检查包括最小字号与文字边界。验证日志和报告同名加`_reproduct`保存于`results/reproduction/`。
+
+当前发布在独立克隆与新建Python环境中通过完整离线流程：5,658项输入哈希、23组比较中的26,477个数值及2,640场抽样重放均通过，最大误差为0，API调用为0。独立克隆生成的PNG和CSV与项目内运行逐字节一致；测试为80项通过、1项跳过。记录见[独立克隆验证](results/reproduction/clean_clone_validation_reproduct.json)和[完整流程报告](results/reproduction/verification_reproduct.json)。
