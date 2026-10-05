@@ -6,7 +6,7 @@
 
 ## 快速复现
 
-在项目根目录执行，推荐 Python 3.12。以下流程读取归档响应，不调用 LLM API。
+在项目根目录执行，推荐 Python 3.12。以下流程读取已有模型响应，不调用 LLM API。
 
 ```powershell
 git clone https://github.com/ShiWenber/Strategy-improvement-despite-mismatched-feedback.git
@@ -29,11 +29,11 @@ Linux/macOS 将解释器路径改为 `.venv/bin/python`。也可使用 `uv sync 
 
 分阶段复现时先运行 `statistics` 再运行 `figures`；它们按依赖顺序读取 `_reproduct` 中间结果。
 
-## 数据范围与来源
+## 论文数据与文件结构
 
-当前发布只保留两种报告条件的原始记录。它们来自既有实验的主线子集，不是重新采集或重新随机化的两条件实验。保留记录的 ID、原始请求位置、提示词、响应、时间戳、候选源码和选择决定不变；ID 中的 `pos` 仍代表原始提交位置，不要求连续。
+论文数据覆盖 DeepSeek 与 Qwen 两个模型的 OFF/ON 四种配置，以及 Accurate 与 Mismatched 两种报告条件。复现使用模型请求与响应、候选程序、选择决定、测试收益和独立行为测量记录。
 
-每个模型与配置有 20 个共享种群、60 个父代、每父代每条件两次生成，因此保留 **240 个候选、120 个双候选池、360 项 S1/S2/S3 选择决定**。四格共 960 个候选响应，共享 DeepSeek OFF 的 240 个初始化响应；模型或配置数量不增加独立种群数。
+每个模型与配置有 20 个共享种群、60 个父代、每父代每条件两次生成，因此包含 **240 个候选、120 个双候选池、360 项 S1/S2/S3 选择决定**。四格共 960 个候选响应，共享 DeepSeek OFF 的 240 个初始化响应；模型或配置数量不增加独立种群数。
 
 | 模型/配置 | 数据目录 | 有效候选 / 240 | 请求设置 |
 |---|---|---:|---|
@@ -42,15 +42,13 @@ Linux/macOS 将解释器路径改为 `.venv/bin/python`。也可使用 `uv sync 
 | Qwen OFF | `results/qwen3_8/off/` | 224 | `qwen3.8-flash`，temperature=1，enable_thinking=false，max_tokens=6000 |
 | Qwen ON | `results/qwen3_8/on/` | 221 | 同一模型，enable_thinking=true，reasoning_effort=high，max_tokens=131072 |
 
-论文中的 DeepSeek 名称为 deepseek-v4.1-flash；归档请求使用当时的 API 标识 `deepseek-flash`。服务端别名和后续模型版本不保证权重固定。ON/OFF 同时改变思考与输出预算，且属于不同时间的采集，不能把配置差单独归因于思考开关。Qwen 是复用同一父代与已使用测试面板的后续模型检验。
-
-`manifest.json` 中的 `archive_projection` 记录主线筛选及原始容器的 SHA256；原 implementation/runner 哈希保留为历史来源。条件容器经过筛选，当前容器哈希不冒充最初封存哈希。`PROMPTS_SEALED.json`、`SELECTIONS_SEALED.json` 与 `H_RELEASED.json` 记录当前保留集及原封存文件来源；候选哈希和保留的选择决定未改。原归档不能被新版生成程序续写；新的 API 实验应使用新目录。
+论文中的 DeepSeek 名称为 deepseek-v4.1-flash；记录的请求使用 API 标识 `deepseek-flash`。服务端别名和后续模型版本不保证权重固定。ON/OFF 同时改变思考与输出预算，且属于不同时间的采集，不能把配置差单独归因于思考开关。Qwen 是复用同一父代与已使用测试面板的后续模型检验。
 
 ### 每种记录表示什么
 
 | 文件/目录 | 内容与用途 |
 |---|---|
-| `manifest.json` | 种群种子、父代名次、保留条件、候选任务、请求配置与来源 |
+| `manifest.json` | 种群种子、父代名次、报告条件、候选任务与请求配置 |
 | `requests_initial/`、`initial/` | 240 个初始化请求/响应及验证后的策略，仅 OFF 保存 |
 | `populations/s200.json` … `s219.json` | 每群 12 个策略、初始训练成绩、反馈测量、无固定点供体置换 |
 | `contexts/s200-rank1.json` 等 | 60 个共享父代、供体、两种完整提示与长度计数 |
@@ -77,9 +75,9 @@ ON 与 Qwen 目录已有共享父代的配套记录，它们不是新增初始�
 
 Raw先在同父代同条件内平均两次生成；S1/S2/S3每池使用选择或父代保留的一个输出。随后在种群内平均3个父代，对20个独立种群等权汇总。主线的条件平均只覆盖Accurate与Mismatched。
 
-原定确认性主比较是 DeepSeek OFF 的 Raw Accurate−Mismatched：均值 −0.000307986，95%区间[−0.010014106, +0.009500625]，双侧精确符号交换p=0.951618。检验枚举2^20个种群符号交换，依赖配对差的符号可交换性；区间用20,000次种群bootstrap，种子2026091903。区间跨零不证明等效。
+预定的确认性主比较是 DeepSeek OFF 的 Raw Accurate−Mismatched：均值 −0.000307986，95%区间[−0.010014106, +0.009500625]，双侧精确符号交换p=0.951618。检验枚举2^20个种群符号交换，依赖配对差的符号可交换性；区间用20,000次种群bootstrap，种子2026091903。区间跨零不证明等效。
 
-ON聚焦比较沿用原两项Holm族；Qwen沿用OFF、ON及ON−OFF的三项Holm族。选择输出、行为、固定池政策、距离关联均属探索性，区间未作多重校正。删除其他条件后，不把剩余探索性检验改称预定确认性检验。
+ON聚焦比较采用两项检验的Holm校正；Qwen的OFF、ON及ON−OFF比较构成三项检验的Holm校正族。选择输出、行为、固定池政策、距离关联均属探索性，区间未作多重校正。
 
 ## 各实验如何复现
 
@@ -88,8 +86,8 @@ ON聚焦比较沿用原两项Holm族；Qwen沿用OFF、ON及ON−OFF的三项Hol
 | 分析 | 计算脚本 | 原始输入 → 重算中间结果 |
 |---|---|---|
 | OFF主比较、两条件Raw/S1/S2/S3、敏感性 | `experiments.direct_reciprocity.specificity_analysis` | OFF请求、封存决定、H → `ANALYSIS_reproduct.json`、`AUDIT_reproduct.json` |
-| ON统计与历史配对配置差 | `thinking_control_analysis.py` | OFF/ON同父代H → ON的`ANALYSIS_reproduct.json` |
-| Qwen四格补充 | `results/qwen3_8/analyze.py` | Qwen请求及H → 各模式与总`ANALYSIS_reproduct.json` |
+| ON统计与同父代OFF/ON配置差 | `thinking_control_analysis.py` | OFF/ON同父代H → ON的`ANALYSIS_reproduct.json` |
+| Qwen主线比较 | `results/qwen3_8/analyze.py` | Qwen请求及H → 各模式与总`ANALYSIS_reproduct.json` |
 | 固定池N/G/U/B选择政策 | `experiments.direct_reciprocity.role_analysis` | 同一候选池的选择成绩及H → `role_analysis/ANALYSIS_reproduct.json` |
 | 候选分布与选择去向 | `tools/analyze_population.py` | OFF/ON 480个候选H与S3决定 → `population_summary_reproduct.json` |
 | 分对手家族收益 | `paper_zh_direct/tools/analyze_opponent_profiles.py` | Accurate/Mismatched每个H对手收益 → `figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json` |
@@ -143,7 +141,7 @@ ON聚焦比较沿用原两项Holm族；Qwen沿用OFF、ON及ON−OFF的三项Hol
 .venv/Scripts/python tools/replay_worker.py --work . --output reproduct/replay.json --full
 ```
 
-`--full`重放每格所有父代/候选的默认H，可能耗时数小时；不会复查全部噪声、长局与F′记录。程序缺陷或重放差异会明确显示，不静默替换归档数据。
+`--full`重放每格所有父代/候选的默认H，可能耗时数小时；不会复查全部噪声、长局与F′记录。程序缺陷或重放差异会明确显示，不静默替换论文数据。
 
 依赖精确版本见`requirements-reproduction.txt`，项目定义与锁见`pyproject.toml`和`uv.lock`：NumPy用于数组/bootstrap，SciPy用于KDE，Matplotlib用于图，pandas用于统计辅助，OpenAI/httpx用于可选API，python-dotenv用于本地密钥，tiktoken用于报告长度。图像不是图像生成模型绘制。
 
@@ -158,7 +156,7 @@ ON聚焦比较沿用原两项Holm族；Qwen沿用OFF、ON及ON−OFF的三项Hol
 
 ## 编译论文与验证
 
-英文正文为`paper_interface_focus/main.tex`，英文附录为`supplement.tex`；中文为`paper_zh_direct/main.tex`。它们共享`paper_zh_direct/figures/`的正式图。复现输出保留在`reproduct/`，不覆盖正式图；发布时正式图已经同步为两条件版本。
+英文正文为`paper_interface_focus/main.tex`，英文附录为`supplement.tex`；中文为`paper_zh_direct/main.tex`。它们共享`paper_zh_direct/figures/`的正式图。复现输出保存在`reproduct/`，不覆盖论文使用的正式图。
 
 仓库提供编译后的[英文正文](paper_interface_focus/main.pdf)、[英文附录](paper_interface_focus/supplement.pdf)和[中文论文](paper_zh_direct/main.pdf)，各保存一份正式PDF。
 
@@ -181,4 +179,4 @@ tectonic main.tex
 
 记录审计检验请求/源码/封存哈希、父代复用、回退算术和选择重建；完整复现将重新计算的种群向量、均值和区间与正式汇总逐项比较。输入清单`results/reproduction/INPUT_MANIFEST.json`在流程前后均核验。图形检查包括最小字号与文字边界。验证日志和报告同名加`_reproduct`保存于`results/reproduction/`。
 
-当前发布在独立克隆与新建Python环境中通过完整离线流程：5,658项输入哈希、23组比较中的26,477个数值及2,640场抽样重放均通过，最大误差为0，API调用为0。独立克隆生成的PNG和CSV与项目内运行逐字节一致；测试为80项通过、1项跳过。记录见[独立克隆验证](results/reproduction/clean_clone_validation_reproduct.json)和[完整流程报告](results/reproduction/verification_reproduct.json)。
+完整离线流程已在独立克隆与新建Python环境中通过验证：5,658项输入哈希、23组比较中的26,477个数值及2,640场抽样重放均通过，最大误差为0，API调用为0。独立克隆生成的PNG和CSV与项目内运行逐字节一致；测试为80项通过、1项跳过。记录见[独立克隆验证](results/reproduction/clean_clone_validation_reproduct.json)和[完整流程报告](results/reproduction/verification_reproduct.json)。
