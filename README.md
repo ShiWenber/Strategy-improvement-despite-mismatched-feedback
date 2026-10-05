@@ -6,6 +6,11 @@
 
 ## 1. 安装与一键运行
 
+```bash
+git clone https://github.com/ShiWenber/Strategy-improvement-despite-mismatched-feedback.git
+cd Strategy-improvement-despite-mismatched-feedback
+```
+
 完整项目要求 Python ≥3.12；本次验证环境为 Python 3.12.7。完整依赖与解析结果分别见 [pyproject.toml](pyproject.toml) 和 [uv.lock](uv.lock)。安装依赖后即可复现：
 
 ```powershell
@@ -229,6 +234,8 @@ python -m experiments.direct_reciprocity.qwen38_control all --source results/new
 原主流水线记录1,102,920场规范收益对局，另有反馈、行为探针、失败验证和重复计算。原六对象样本有一无效候选不重放，其他五对象共1200场。此次默认复现扩展到四配置的相同身份选择规则，实际对局数和误差见`reproduct/replay.json`；它使用当前项目模拟器，不是独立执行器验证，更不是对全部百万场的全量重放。
 
 ## 9. 验证证据和范围
+
+已在干净 Git 克隆和新建最小依赖环境中完成全部流程：12,563 个原始输入哈希通过，26 组共 54,800 个数值与论文原结果逐值一致，样本重放 5520 场、最大误差 0；102 项测试通过、1 项跳过。英文正文、英文补充材料和中文稿均重新编译成功。完整证据见 [clean_clone_validation_reproduct.json](results/reproduction/clean_clone_validation_reproduct.json)。
 
 每次运行产生 [verification_reproduct.json](results/reproduction/verification_reproduct.json)，记录输入哈希检查、逐组数值比较、最大误差、执行命令和耗时。对局重放记录在 [replay.json](reproduct/replay.json)，图像来源清单在 [FIGURE_MANIFEST_reproduct.json](results/reproduction/FIGURE_MANIFEST_reproduct.json)。PDF/SVG 的时间或字体元数据可随环境变化，统计值与输入内容是主要核对对象。
 
