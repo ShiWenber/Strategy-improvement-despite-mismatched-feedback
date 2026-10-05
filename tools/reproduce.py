@@ -121,7 +121,7 @@ def statistics():
     run('main_statistics', ['-m', 'experiments.direct_reciprocity.specificity_analysis'])
     rel = RUNS['DeepSeek/OFF'] + '/ANALYSIS.json'
     before, after = frozen(rel), read(WORK / rel)
-    compare('main raw/selected/primary/secondary', {k: before[k] for k in ['raw', 'selected', 'primary']},
+    compare('main raw/selected/primary', {k: before[k] for k in ['raw', 'selected', 'primary']},
             {k: after[k] for k in ['raw', 'selected', 'primary']})
     run('fixed_pool', ['-m', 'experiments.direct_reciprocity.role_analysis'])
     rel = RUNS['DeepSeek/OFF'] + '/role_analysis/ANALYSIS.json'
