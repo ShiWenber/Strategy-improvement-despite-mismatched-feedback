@@ -35,7 +35,7 @@ EXPLOITATION_METRICS = ('own_cooperation_first4', 'own_cooperation_after4',
                         'mutual_cooperation_last5', 'own_cooperation_last5',
                         'unilateral_cooperation_last5', 'score')
 
-ARMS = ('score', 'accurate', 'mismatched', 'background', 'cooperation')
+ARMS = ('accurate', 'mismatched')
 
 REGIMES = {
     'thinking_off': 'results/feedback_specificity_v2',
@@ -247,11 +247,7 @@ def assemble_outcomes(regime, rows):
         row['behavior_move_raw'] = mean(all_moves) if all_moves else None
         for arm, value in per_arm.items():
             row[f'behavior_move_{arm}'] = value
-        # Within-parent differentials. These subtract the parent's own score-only
-        # reactivity, so a parent that simply moves little (or is already at a
-        # behavioural ceiling) cannot drive the contrast.
-        if 'mismatched' in per_arm and 'score' in per_arm:
-            row['behavior_move_excess_mismatched'] = per_arm['mismatched'] - per_arm['score']
+        # Within-parent report-matching differential.
         if 'mismatched' in per_arm and 'accurate' in per_arm:
             row['behavior_move_mismatched_minus_accurate'] = per_arm['mismatched'] - per_arm['accurate']
         # Code change: character-level edit distance proxy between parent and candidate.
@@ -457,8 +453,6 @@ def analyze_regime(name, root, output_dir):
                ('behavior_move_raw', 'Raw candidate behavioural movement (all arms)', 'behavior_move_raw'),
                ('behavior_move_mismatched', 'Mismatched-arm behavioural movement', 'behavior_move_mismatched'),
                ('behavior_move_accurate', 'Accurate-arm behavioural movement', 'behavior_move_accurate'),
-               ('behavior_move_excess_mismatched', 'Mismatched-arm movement minus Score-arm movement',
-                'behavior_move_excess_mismatched'),
                ('behavior_move_mismatched_minus_accurate', 'Movement: Mismatched minus Accurate',
                 'behavior_move_mismatched_minus_accurate'),
                ('code_change_raw', 'Raw candidate code change (all arms)', 'code_change_raw'),
@@ -565,7 +559,7 @@ def _excludes_zero(interval):
 
 TARGET_ORDER = ('tau_raw', 'raw_gain_mismatched', 'raw_gain_accurate', 'tau_s3',
                 'behavior_move_mismatched', 'behavior_move_accurate',
-                'behavior_move_excess_mismatched', 'behavior_move_mismatched_minus_accurate',
+                'behavior_move_mismatched_minus_accurate',
                 'code_change_mismatched', 'code_change_mismatched_minus_accurate')
 
 
@@ -725,7 +719,7 @@ def write_markdown(payloads, output_path):
     lines.append('')
     lines.append('**方法与适用边界。** 距离仅基于反馈探针 $F$ 的 36 维统计量；标准化参照为全体 240 个')
     lines.append('种群成员；关联分析未做多重检验校正；行为变化量以父代自身探针行为为基准，')
-    lines.append('受行为天花板影响，故同时报告扣除 Score 组反应性的组内差分与 Mismatched−Accurate 配对差；')
+    lines.append('受行为天花板影响，故同时报告 Mismatched−Accurate 配对差；')
     lines.append('S3 输出收益是选择（含门控与是否采用）之后的非线性量，其关联只能视为探索性。')
     lines.append('相关性不等于因果中介；本分析不能替代审稿意见 3 所要求的 known-defect 阳性对照。')
     lines.append('')
@@ -762,7 +756,7 @@ def _conclusions(payloads, regime_labels):
     lines.append('')
     gain_targets = ('tau_raw', 'raw_gain_mismatched', 'raw_gain_accurate', 'tau_s3')
     behaviour_targets = ('behavior_move_mismatched', 'behavior_move_accurate',
-                         'behavior_move_excess_mismatched', 'behavior_move_mismatched_minus_accurate',
+                         'behavior_move_mismatched_minus_accurate',
                          'code_change_mismatched', 'code_change_mismatched_minus_accurate')
     hits = {'gain': [], 'behaviour': []}
     for name, payload in payloads.items():
@@ -800,7 +794,7 @@ def _conclusions(payloads, regime_labels):
                 parts.append('为负相关')
             else:
                 parts.append('在不同配置/距离间符号不一致')
-            parts.append('，而**组内差分**（扣除 Score 组反应性、或 Mismatched−Accurate 配对差）'
+            parts.append('，而**组内差分**（Mismatched−Accurate 配对差）'
                          f'在 {len(differential)} 个组合中一致为负。')
             parts.append('两者回答不同问题：原始移动量混合了父代自身的行为反应性，'
                          '组内差分则在扣除父代基线后测量可归因于错配的额外移动，'

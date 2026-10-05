@@ -56,7 +56,7 @@ $\delta_{\text{expl}}$、按种群内平均两两距离归一化的 $\delta_{\te
 
 **各条件原始候选增益（每轮收益）与主对照：**
 
-score +0.00381，accurate +0.00232，mismatched +0.00263，background +0.00975，cooperation +0.01651。
+accurate +0.00232，mismatched +0.00263。
 
 主对照 Accurate−Mismatched = **-0.000308**（正式区间与配对符号交换检验见 `ANALYSIS.json`）。
 
@@ -70,7 +70,6 @@ score +0.00381，accurate +0.00232，mismatched +0.00263，background +0.00975�
 | $\delta_{\text{full}}$ | Accurate - Mismatched S3 gain | -0.062 | [-0.197, +0.092] | +0.036 | -0.071 | 20/20 |
 | $\delta_{\text{full}}$ | Mismatched-arm behavioural movement | +0.254 | [-0.006, +0.470] | +0.257 | +0.251 | 20/20 |
 | $\delta_{\text{full}}$ | Accurate-arm behavioural movement | +0.281 | [-0.092, +0.564] | +0.224 | +0.300 | 20/20 |
-| $\delta_{\text{full}}$ | Mismatched-arm movement minus Score-arm movement | -0.102 | [-0.317, +0.167] | +0.028 | -0.144 | 20/20 |
 | $\delta_{\text{full}}$ | Movement: Mismatched minus Accurate | -0.045 | [-0.272, +0.222] | -0.035 | -0.070 | 19/20 |
 | $\delta_{\text{full}}$ | Mismatched-arm code change | -0.024 | [-0.192, +0.196] | +0.139 | -0.040 | 17/20 |
 | $\delta_{\text{full}}$ | Code change: Mismatched minus Accurate | +0.040 | [-0.097, +0.182] | +0.156 | +0.009 | 20/20 |
@@ -80,7 +79,6 @@ score +0.00381，accurate +0.00232，mismatched +0.00263，background +0.00975�
 | $\delta_{\text{rec}}$ | Accurate - Mismatched S3 gain | -0.049 | [-0.209, +0.131] | -0.003 | -0.059 | 20/20 |
 | $\delta_{\text{rec}}$ | Mismatched-arm behavioural movement | +0.194 | [-0.061, +0.418] | +0.168 | +0.191 | 20/20 |
 | $\delta_{\text{rec}}$ | Accurate-arm behavioural movement | +0.254 | [-0.070, +0.534] | +0.270 | +0.280 | 20/20 |
-| $\delta_{\text{rec}}$ | Mismatched-arm movement minus Score-arm movement | -0.106 | [-0.306, +0.167] | -0.031 | -0.162 | 20/20 |
 | $\delta_{\text{rec}}$ | Movement: Mismatched minus Accurate | -0.081 | [-0.295, +0.174] | -0.119 | -0.114 | 19/20 |
 | $\delta_{\text{rec}}$ | Mismatched-arm code change | +0.059 | [-0.117, +0.288] | +0.202 | +0.039 | 20/20 |
 | $\delta_{\text{rec}}$ | Code change: Mismatched minus Accurate | +0.108 | [-0.057, +0.273] | +0.220 | +0.067 | 20/20 |
@@ -90,7 +88,6 @@ score +0.00381，accurate +0.00232，mismatched +0.00263，background +0.00975�
 | $\delta_{\text{expl}}$ | Accurate - Mismatched S3 gain | -0.031 | [-0.240, +0.207] | +0.060 | -0.041 | 17/20 |
 | $\delta_{\text{expl}}$ | Mismatched-arm behavioural movement | +0.293 | [+0.015, +0.529] | +0.275 | +0.285 | 20/20 |
 | $\delta_{\text{expl}}$ | Accurate-arm behavioural movement | +0.270 | [-0.151, +0.567] | +0.065 | +0.271 | 20/20 |
-| $\delta_{\text{expl}}$ | Mismatched-arm movement minus Score-arm movement | -0.104 | [-0.354, +0.163] | -0.015 | -0.122 | 20/20 |
 | $\delta_{\text{expl}}$ | Movement: Mismatched minus Accurate | +0.012 | [-0.258, +0.313] | +0.065 | +0.003 | 14/20 |
 | $\delta_{\text{expl}}$ | Mismatched-arm code change | -0.147 | [-0.323, +0.061] | -0.041 | -0.147 | 20/20 |
 | $\delta_{\text{expl}}$ | Code change: Mismatched minus Accurate | -0.076 | [-0.216, +0.064] | -0.031 | -0.082 | 20/20 |
@@ -130,7 +127,7 @@ score +0.00381，accurate +0.00232，mismatched +0.00263，background +0.00975�
 
 **各条件原始候选增益（每轮收益）与主对照：**
 
-score +0.05272，accurate +0.07198，mismatched +0.06585，background +0.05781，cooperation +0.05284。
+accurate +0.07198，mismatched +0.06585。
 
 主对照 Accurate−Mismatched = **+0.006127**（正式区间与配对符号交换检验见 `ANALYSIS.json`）。
 
@@ -144,7 +141,6 @@ score +0.05272，accurate +0.07198，mismatched +0.06585，background +0.05781�
 | $\delta_{\text{full}}$ | Accurate - Mismatched S3 gain | +0.245 | [+0.038, +0.402] | +0.229 | +0.256 | 20/20 |
 | $\delta_{\text{full}}$ | Mismatched-arm behavioural movement | -0.336 | [-0.588, -0.094] | -0.292 | -0.310 | 20/20 |
 | $\delta_{\text{full}}$ | Accurate-arm behavioural movement | +0.091 | [-0.135, +0.305] | +0.018 | +0.140 | 20/20 |
-| $\delta_{\text{full}}$ | Mismatched-arm movement minus Score-arm movement | -0.385 | [-0.574, -0.156] | -0.332 | -0.394 | 20/20 |
 | $\delta_{\text{full}}$ | Movement: Mismatched minus Accurate | -0.353 | [-0.559, -0.144] | -0.302 | -0.355 | 20/20 |
 | $\delta_{\text{full}}$ | Mismatched-arm code change | +0.256 | [-0.174, +0.603] | +0.197 | +0.256 | 20/20 |
 | $\delta_{\text{full}}$ | Code change: Mismatched minus Accurate | +0.107 | [-0.164, +0.387] | +0.174 | +0.101 | 20/20 |
@@ -154,7 +150,6 @@ score +0.05272，accurate +0.07198，mismatched +0.06585，background +0.05781�
 | $\delta_{\text{rec}}$ | Accurate - Mismatched S3 gain | +0.270 | [+0.037, +0.439] | +0.277 | +0.287 | 20/20 |
 | $\delta_{\text{rec}}$ | Mismatched-arm behavioural movement | -0.401 | [-0.609, -0.176] | -0.319 | -0.366 | 20/20 |
 | $\delta_{\text{rec}}$ | Accurate-arm behavioural movement | +0.025 | [-0.194, +0.249] | -0.046 | +0.084 | 17/20 |
-| $\delta_{\text{rec}}$ | Mismatched-arm movement minus Score-arm movement | -0.374 | [-0.532, -0.132] | -0.282 | -0.386 | 20/20 |
 | $\delta_{\text{rec}}$ | Movement: Mismatched minus Accurate | -0.349 | [-0.560, -0.135] | -0.258 | -0.352 | 20/20 |
 | $\delta_{\text{rec}}$ | Mismatched-arm code change | +0.289 | [-0.069, +0.599] | +0.292 | +0.289 | 20/20 |
 | $\delta_{\text{rec}}$ | Code change: Mismatched minus Accurate | +0.131 | [-0.119, +0.387] | +0.195 | +0.127 | 20/20 |
@@ -164,7 +159,6 @@ score +0.05272，accurate +0.07198，mismatched +0.06585，background +0.05781�
 | $\delta_{\text{expl}}$ | Accurate - Mismatched S3 gain | +0.144 | [-0.031, +0.305] | +0.100 | +0.144 | 20/20 |
 | $\delta_{\text{expl}}$ | Mismatched-arm behavioural movement | -0.173 | [-0.478, +0.114] | -0.147 | -0.167 | 20/20 |
 | $\delta_{\text{expl}}$ | Accurate-arm behavioural movement | +0.179 | [-0.094, +0.428] | +0.151 | +0.207 | 20/20 |
-| $\delta_{\text{expl}}$ | Mismatched-arm movement minus Score-arm movement | -0.301 | [-0.561, -0.041] | -0.244 | -0.308 | 20/20 |
 | $\delta_{\text{expl}}$ | Movement: Mismatched minus Accurate | -0.296 | [-0.496, -0.088] | -0.319 | -0.299 | 20/20 |
 | $\delta_{\text{expl}}$ | Mismatched-arm code change | +0.154 | [-0.381, +0.547] | +0.001 | +0.156 | 19/20 |
 | $\delta_{\text{expl}}$ | Code change: Mismatched minus Accurate | +0.048 | [-0.257, +0.354] | +0.062 | +0.033 | 19/20 |
@@ -232,24 +226,21 @@ score +0.05272，accurate +0.07198，mismatched +0.06585，background +0.05781�
 | --- | --- | --- | ---: | --- |
 | 思考关闭（旧配置） | $\delta_{\text{expl}}$ | Mismatched-arm behavioural movement | +0.293 | [+0.015, +0.529] |
 | 思考开启（384K） | $\delta_{\text{full}}$ | Mismatched-arm behavioural movement | -0.336 | [-0.588, -0.094] |
-| 思考开启（384K） | $\delta_{\text{full}}$ | Mismatched-arm movement minus Score-arm movement | -0.385 | [-0.574, -0.156] |
 | 思考开启（384K） | $\delta_{\text{full}}$ | Movement: Mismatched minus Accurate | -0.353 | [-0.559, -0.144] |
 | 思考开启（384K） | $\delta_{\text{rec}}$ | Mismatched-arm behavioural movement | -0.401 | [-0.609, -0.176] |
-| 思考开启（384K） | $\delta_{\text{rec}}$ | Mismatched-arm movement minus Score-arm movement | -0.374 | [-0.532, -0.132] |
 | 思考开启（384K） | $\delta_{\text{rec}}$ | Movement: Mismatched minus Accurate | -0.349 | [-0.560, -0.135] |
-| 思考开启（384K） | $\delta_{\text{expl}}$ | Mismatched-arm movement minus Score-arm movement | -0.301 | [-0.561, -0.041] |
 | 思考开启（384K） | $\delta_{\text{expl}}$ | Movement: Mismatched minus Accurate | -0.296 | [-0.496, -0.088] |
 
-行为层面的关联并非单一方向：**原始移动量**（Mismatched-arm behavioural movement）在不同配置/距离间符号不一致，而**组内差分**（扣除 Score 组反应性、或 Mismatched−Accurate 配对差）在 6 个组合中一致为负。两者回答不同问题：原始移动量混合了父代自身的行为反应性，组内差分则在扣除父代基线后测量可归因于错配的额外移动，后者随距离下降更符合"报告越偏离自身，模型越少据此修改"的读法。
+行为层面的关联并非单一方向：**原始移动量**（Mismatched-arm behavioural movement）在不同配置/距离间符号不一致，而**组内差分**（Mismatched−Accurate 配对差）在 3 个组合中一致为负。两者回答不同问题：原始移动量混合了父代自身的行为反应性，组内差分则在扣除父代基线后测量可归因于错配的额外移动，后者随距离下降更符合"报告越偏离自身，模型越少据此修改"的读法。
 
 收益层面仅 S3 输出收益出现正相关，且只在思考开启配置中；原始候选收益（主对照）在所有距离定义下均不显著。S3 收益是门控与采用规则之后的非线性量，该关联不能读作"错配越远、准确诊断越有用"。
 
-这些关联均未做多重检验校正（此处共检查 60 个组合），且大多只在一个配置中出现，只能作为待验证的探索性观察，不能作为机制结论。
+这些关联均未做多重检验校正（此处共检查 54 个组合），且大多只在一个配置中出现，只能作为待验证的探索性观察，不能作为机制结论。
 
 4. **对审稿意见 3 的作用是排除一种解释，而不是替代它。** 本分析可以排除"错配强度不足以致无法检验"这一解释，但不能排除"数值报告本身可利用性有限"或"模型主要依据源码与成绩修改"（对应审稿意见中的 $H_2$、$H_3$）。后者需要 known-defect 阳性对照实验。
 
 **方法与适用边界。** 距离仅基于反馈探针 $F$ 的 36 维统计量；标准化参照为全体 240 个
 种群成员；关联分析未做多重检验校正；行为变化量以父代自身探针行为为基准，
-受行为天花板影响，故同时报告扣除 Score 组反应性的组内差分与 Mismatched−Accurate 配对差；
+受行为天花板影响，故同时报告 Mismatched−Accurate 配对差；
 S3 输出收益是选择（含门控与是否采用）之后的非线性量，其关联只能视为探索性。
 相关性不等于因果中介；本分析不能替代审稿意见 3 所要求的 known-defect 阳性对照。

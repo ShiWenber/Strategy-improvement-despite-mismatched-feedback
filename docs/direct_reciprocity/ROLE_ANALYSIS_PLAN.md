@@ -1,22 +1,3 @@
-> 本轮符号沿用写作时的 R/G/U/B（反馈报告记为 $D$）。
+# Fixed-pool policy analysis
 
-# 固定候选池中的生成与选择：事后分析方案
-
-2026-09-20。编写时已知 v2 主结果与各组汇总；以下不是预注册或新的独立确认实验。运行前固定计算定义，不改动 v2 的候选、选择、测试和主次检验。
-
-问题：已有 600 个候选提供多少未选优收益？外部评价与父代保留是否在相同候选池中增加收益？其中有多少来自拒绝候选，有多少来自两个候选之间的择优？
-
-每个父代、反馈条件各有两个固定候选。无效候选沿用父代部署回退。对默认、噪声和长局三个测试环境分别计算：
-
-1. R：均匀随机采用两个候选之一，精确期望为两个部署增量的均值，不另做随机采样。
-2. G：均匀随机采用一个候选，只在该候选的 S1/S2/S3 评价分严格超过父代且有效时采用，否则保留父代。精确期望为两个候选的评价门控增量均值。
-3. U：先用评价器找出严格超过父代的有效候选，再在合格候选中均匀随机采用一个；没有合格候选则保留父代。U 与正式选择具有相同接受上下文，分离合格池内的排序作用。
-4. B：原封存的最优候选加父代保留规则。
-
-报告 B−R；沿 R→G→U→B 的指定顺序分解为 G−R（单候选拒绝门）、U−G（第二次候选机会）和 B−U（合格池内按分数排序）。该分解依赖路径，不称普适因果贡献比例。不得用测试分数决定任何控制规则的输出。
-
-逐种群先对三个父代取平均，再跨 20 个种群平均；汇总组先在种群内对五组等权平均。所有对比配对种群 bootstrap 20,000 次、固定随机种子 20260920；区间未经多重校正，仅探索性。另报原始候选改善/退化/持平个数、双候选池含改善候选个数及正式选择中测试退化个数，均不转为新增确认性检验。
-
-核验：R 必须逐种群复现冻结 raw 结果，B 必须逐种群复现冻结 selected 结果，三个差分必须逐上下文加和等于 B−R；所有 B 选择须从评价分重建并与封存决定一致；检查相等分保留父代、无效候选、不接受、单合格、双合格等例子。保存输入文件指纹。
-
-边界：这是已有固定池的离线政策比较，不是多代干预。没有随机代码变异算子，不能说 LLM 等同随机突变；没有因果定位与已知正确补丁，不能说模型不能进行因果修复。若固定池结果支持筛选价值，论述仍须保留生成器供应候选的前提。
+Post hoc analysis of the retained Accurate and Mismatched candidate pools, with 20 independent population clusters. N uniformly samples one of two candidates, G samples then gates against the parent, U uniformly samples eligible candidates, and B ranks eligible candidates. Eligibility uses only S1/S2/S3 scores; H is used only for evaluation. Exact policy expectations satisfy B-N=(G-N)+(U-G)+(B-U). Use 20,000 bootstrap replicates, seed 20260920.

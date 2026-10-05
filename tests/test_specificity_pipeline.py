@@ -19,10 +19,8 @@ class FakeGenerator:
         self.directory = Path(directory)
 
     def generate(self, identity, prompt, cfg):
-        # The scalar-only child has a better synthetic train score, worse H.
-        scalar = not identity.startswith('init-') and not any(
-            text in prompt for text in ('MEASURED PARENT BEHAVIOR', 'BACKGROUND INFORMATION', 'GENERAL COOPERATION ADVICE'))
-        p = Policy(identity, TRAIN[1 if scalar else 0].code)
+        # A higher selection score deliberately accompanies a worse held-out payoff.
+        p = Policy(identity, TRAIN[1 if '-d0-' in identity else 0].code)
         write_json(self.directory / (identity + '.json'), {
             'prompt': prompt, 'status': 'valid', 'started_at': time.time(),
             'code_hash': p.key, 'returned_model': 'offline-synthetic-fixture',
@@ -48,7 +46,6 @@ class PipelineTest(unittest.TestCase):
     def test_frozen_flow_selects_without_holdout_and_audits(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            write_json(root / 'PILOT.json', {'complete': True})
             with patch.object(runner, 'SEEDS', (901, 902)), patch.object(runner, 'RANKS', (1,)), \
                  patch.object(analysis, 'SEEDS', (901, 902)), patch.object(analysis, 'RANKS', (1,)), \
                  patch.object(runner, 'Generator', FakeGenerator), \
@@ -69,7 +66,9 @@ class PipelineTest(unittest.TestCase):
                 for kind, identity in identities:
                     runner.evaluation_job((str(root), kind, identity))
                 selection = runner.seal_selections(root, manifest)
-                self.assertTrue(all(r['accepted'] for r in selection['rows'] if r['arm'] == 'score'))
+                self.assertTrue(all(r['accepted'] for r in selection['rows']))
+                self.assertEqual(manifest['arms'], ['accurate', 'mismatched'])
+                self.assertEqual(len(manifest['jobs']), 8)
                 self.assertFalse((root / 'holdout').exists())
                 write_json(root / 'H_RELEASED.json', {
                     'selection_digest': digest((root / 'SELECTIONS_SEALED.json').read_text(encoding='utf-8'))})
@@ -78,9 +77,8 @@ class PipelineTest(unittest.TestCase):
                 write_json(root / 'COMPLETE.json', {'synthetic': True})
                 result = analysis.analyze(root)
                 self.assertEqual(result['audit']['issues'], [])
-                self.assertEqual(result['audit']['n_requests'], 44)
-                self.assertEqual(result['selected']['S3/score']['metrics']['default']['mean'], -3)
-                self.assertFalse(result['gate']['quantitative_pass'])
+                self.assertEqual(result['audit']['n_requests'], 32)
+                self.assertEqual(result['selected']['S3/accurate']['metrics']['default']['mean'], -3)
 
 
 if __name__ == '__main__':

@@ -113,7 +113,7 @@ def run(root):
                   bootstrap_seed=20260920, bootstrap_replicates=20000, independent_clusters=20,
                   counts=dict(counts), summaries=summaries, rows=records, input_sha256=hashes,
                   plan_sha256=hashlib.sha256(plan.read_bytes()).hexdigest(),
-                  verification=dict(policy_edge_cases='passed', sealed_decisions_reconstructed=900,
+                  verification=dict(policy_edge_cases='passed', sealed_decisions_reconstructed=len(sealed),
                                     frozen_raw_and_selected_seed_values='passed', decomposition_identity='passed'))
     (out/'ANALYSIS.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
     lines = ['# 固定池角色分析（事后探索）', '', result['note'], '',

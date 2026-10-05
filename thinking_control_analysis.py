@@ -20,8 +20,8 @@ def audit(root, m):
     release = read_json(root/'H_RELEASED.json')
     read_json(root/'COMPLETE.json')
     selected = seal_selections(root, m, readonly=True)
-    if len(selected['rows']) != 900:
-        issues.append('Expected 900 sealed selections')
+    if len(selected['rows']) != len(m['jobs']) // m['draws'] * 3:
+        issues.append('Sealed selection count differs from manifest')
     if release['selection_digest'] != digest((root/'SELECTIONS_SEALED.json').read_text(encoding='utf-8')):
         issues.append('Selection seal mismatch')
     for j in m['jobs']:
@@ -164,7 +164,7 @@ def analyze(root):
     write_json(root/'ANALYSIS.json',result)
     lines = ['# 原生思考模式 384K：历史配对补充实验','',
              f"完成 {aud['requests']} 次新候选调用，有效 {aud['statuses'].get('valid',0)} 个；记录审计问题 {len(aud['issues'])}。",
-             '','同一 60 个父代、五种反馈、每组两个候选。thinking=enabled，reasoning_effort=high，max_tokens=384000。','',
+             '','同一 60 个父代、两种报告条件、每组两个候选。thinking=enabled，reasoning_effort=high，max_tokens=384000。','',
              '| 反馈组 | 旧配置原始增量 | 思考原始增量 | 旧配置 S3 增量 | 思考 S3 增量 | 思考有效候选 |',
              '| --- | ---: | ---: | ---: | ---: | ---: |']
     for arm in m['arms']:

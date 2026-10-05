@@ -19,7 +19,7 @@ CHECKS = WORK / 'results/reproduction'
 RUNS = {'DeepSeek/OFF': 'results/feedback_specificity_v2',
         'DeepSeek/ON': 'results/feedback_specificity_thinking_384k_20260923',
         'Qwen/OFF': 'results/qwen3_8/off', 'Qwen/ON': 'results/qwen3_8/on'}
-ARMS = ['score', 'accurate', 'mismatched', 'background', 'cooperation']
+ARMS = ['accurate', 'mismatched']
 REPORT = {'scope': 'Frozen-response statistical reproduction and sampled game replay',
           'live_api_calls': 0, 'steps': [], 'comparisons': []}
 
@@ -33,7 +33,9 @@ def read(p):
 def write(p, value):
     p = Path(p)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    temporary = p.with_name(p.name + '.tmp')
+    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    os.replace(temporary, p)
 
 
 def sha(p):
@@ -119,8 +121,8 @@ def statistics():
     run('main_statistics', ['-m', 'experiments.direct_reciprocity.specificity_analysis'])
     rel = RUNS['DeepSeek/OFF'] + '/ANALYSIS.json'
     before, after = frozen(rel), read(WORK / rel)
-    compare('main raw/selected/primary/secondary', {k: before[k] for k in ['raw', 'selected', 'primary', 'secondary']},
-            {k: after[k] for k in ['raw', 'selected', 'primary', 'secondary']})
+    compare('main raw/selected/primary/secondary', {k: before[k] for k in ['raw', 'selected', 'primary']},
+            {k: after[k] for k in ['raw', 'selected', 'primary']})
     run('fixed_pool', ['-m', 'experiments.direct_reciprocity.role_analysis'])
     rel = RUNS['DeepSeek/OFF'] + '/role_analysis/ANALYSIS.json'
     compare('fixed_pool summaries', frozen(rel)['summaries'], read(WORK / rel)['summaries'])
@@ -147,7 +149,6 @@ def statistics():
     before, after = frozen(rel), read(WORK / rel)
     for config in ['non_thinking', 'thinking']:
         compare('behavior ' + config, before['configs'][config]['summaries'], after['configs'][config]['summaries'])
-    compare('example selection', [c['id'] for c in before['examples']], [c['id'] for c in after['examples']])
     run('distance_statistics', ['-m', 'experiments.direct_reciprocity.mismatch_distance', '--root', '.'])
     for mode in ['off', 'on']:
         rel = 'docs/direct_reciprocity/mismatch_distance/mismatch_distance_thinking_' + mode + '.json'
@@ -155,13 +156,9 @@ def statistics():
         # Compare measurements and inference independently of path metadata.
         for key in ['rows', 'distance_summary', 'distance_diagnostics', 'weak_mismatch_sensitivity']:
             compare('distance ' + mode + ' ' + key, before[key], after[key])
-    run('pilot_statistics', ['-m', 'experiments.direct_reciprocity.feedback_analysis'])
-    rel = 'results/feedback_attribution_v1/ANALYSIS.json'
-    before, after = frozen(rel), read(WORK / rel)
-    for key in before:
-        if key not in ['audit', 'manifest', 'source_hash', 'root', 'note']:
-            compare('pilot ' + key, before[key], after[key])
     run('cross_model_checks', ['results/model_comparison_20260928/cross_model_summary.py'])
+    rel = 'results/model_comparison_20260928/cross_model_mainline_data.json'
+    compare('cross-model mainline summaries', frozen(rel)['statistics'], read(WORK / rel)['statistics'])
     export_data()
 
 
