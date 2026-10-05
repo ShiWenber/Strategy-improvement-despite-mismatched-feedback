@@ -308,13 +308,16 @@ def release_parents(root, m):
 
 
 def main():
+    global SOURCE
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('stage', choices=['prepare','first','all','select','holdout'])
     p.add_argument('--output', required=True)
+    p.add_argument('--source', default=str(SOURCE), help='Completed OFF experiment supplying parents and prompts')
     p.add_argument('--api-workers', type=int, default=12)
     p.add_argument('--workers', type=int, default=24)
     p.add_argument('--env-file', default='../../.env')
     a = p.parse_args()
+    SOURCE = Path(a.source)
     from dotenv import load_dotenv
     load_dotenv(a.env_file, override=False)
     root = Path(a.output)

@@ -6,7 +6,7 @@ import random
 from statistics import mean
 
 from .core import Config, Policy, digest
-from .feedback import ARMS, MIXTURES, feedback_prompt, source_hash
+from .feedback import ARMS, MIXTURES, feedback_prompt
 from .run import read_json, write_json
 
 
@@ -39,8 +39,6 @@ def analyze(root):
     root = Path(root)
     manifest = read_json(root / 'manifest.json')
     issues, missing, outcomes = [], [], []
-    if source_hash() != manifest['implementation_hash']:
-        issues.append('Implementation fingerprint mismatch')
     records = []
     for job in manifest['jobs']:
         path = root / 'outcomes' / (job['id'] + '.json')

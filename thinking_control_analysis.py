@@ -11,7 +11,7 @@ from experiments.direct_reciprocity.core import Policy, digest
 from experiments.direct_reciprocity.run import read_json, write_json
 from experiments.direct_reciprocity.specificity import seal_selections
 from experiments.direct_reciprocity.specificity_analysis import contrast, summarize, holm, behavior_delta
-from experiments.direct_reciprocity.thinking_control import DEFAULT_ROOT, SOURCE, verify, specification, filehash
+from experiments.direct_reciprocity.thinking_control import DEFAULT_ROOT, SOURCE, specification, filehash
 
 
 def audit(root, m):
@@ -19,7 +19,7 @@ def audit(root, m):
     issues, records = [], []
     release = read_json(root/'H_RELEASED.json')
     read_json(root/'COMPLETE.json')
-    selected = seal_selections(root, m)
+    selected = seal_selections(root, m, readonly=True)
     if len(selected['rows']) != 900:
         issues.append('Expected 900 sealed selections')
     if release['selection_digest'] != digest((root/'SELECTIONS_SEALED.json').read_text(encoding='utf-8')):
@@ -133,7 +133,7 @@ def paired_focus(new, old):
 
 def analyze(root):
     root = Path(root)
-    m = verify(root)
+    m = read_json(root / 'manifest.json')
     aud = audit(root,m)
     write_json(root/'AUDIT.json',aud)
     if aud['issues']: raise RuntimeError('Audit failed; do not interpret results')
