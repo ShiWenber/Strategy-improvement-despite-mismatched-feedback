@@ -1,0 +1,4542 @@
+{
+  "id": "s210-rank6-d1-pos3",
+  "context": "s210-rank6",
+  "seed": 210,
+  "rank": 6,
+  "draw": 1,
+  "position": 3,
+  "arm": "accurate",
+  "child": {
+    "name": "s210-rank6-d1-pos3",
+    "code": "def strategy(history, rng):\n    n = len(history)\n    if n == 0:\n        return 'C'\n\n    # Endgame logic for fixed 100-round matches.\n    # If the opponent is a persistent defector (e.g., ALLD), defect to minimize loss.\n    # If there's any hope of cooperation or we are in mutual defection loop against TFT-like, \n    # sometimes C can break loops, but D is safer against pure defectors.\n    # Given noise=0, if opp has been mostly D, they likely stay D.\n    # We check recent history.\n    \n    me = [h[0] for h in history]\n    opp = [h[1] for h in history]\n    \n    last_opp = opp[-1]\n    last_me = me[-1]\n    \n    # Count opponent defections in recent window\n    window_size = min(10, n)\n    recent_opp = opp[-window_size:]\n    recent_opp_d_count = sum(1 for x in recent_opp if x == 'D')\n    \n    # Total stats\n    total_opp_c = sum(1 for x in opp if x == 'C')\n    total_opp_d = n - total_opp_c\n    \n    # Heuristic for detecting \"Bad\" opponents (persistent defectors)\n    # If opponent defects more than 60% of the time recently and overall, treat as hostile.\n    is_hostile = False\n    if n > 5:\n        if recent_opp_d_count / window_size > 0.6 and total_opp_d / n > 0.5:\n            is_hostile = True\n            \n    # Specific handling for TFT-like behavior (retaliation then forgiveness)\n    # If last opp was D, did we cause it?\n    caused_retaliation = False\n    if n >= 2 and last_opp == 'D':\n        # Check if we defected previously while they cooperated\n        prev_me = me[-2]\n        prev_opp = opp[-2]\n        if prev_me == 'D' and prev_opp == 'C':\n            caused_retaliation = True\n\n    # Decision Logic\n    \n    # 1. Endgame Exploitation / Safety\n    if n >= 98:\n        if is_hostile:\n            return 'D'\n        # Against cooperative/TFT types, C maintains score if they reciprocate.\n        # However, standard IPD endgame logic suggests D if you think they won't punish.\n        # But here matches are long. Let's stick to robustness.\n        # If we've been cooperating, keep doing so to avoid triggering a final punishment loop if they are TFT.\n        if last_opp == 'C':\n            return 'C'\n        return 'D'\n\n    # 2. Handling Hostile Opponents\n    if is_hostile:\n        # If they just cooperated, it might be a mistake or a trap. \n        # But generally, do not trust high-defection rates.\n        # Occasionally try C to see if they switch? Risky.\n        # Better: Mirror their aggression. If they D, we D. If they C, maybe C to test?\n        # Strategy: Defect primarily.\n        if last_opp == 'D':\n            return 'D'\n        else:\n            # They cooperated despite being \"hostile\" average. Could be noise (but noise=0) or change of heart.\n            # Cooperate once to encourage CC, but expect D next.\n            return 'C'\n\n    # 3. Standard Tit-for-Tat with Forgiveness/Probing\n    \n    if last_opp == 'C':\n        # They cooperated. \n        # If we were hostile/had been defecting, maybe continue defecting if beneficial?\n        # No, usually reciprocate C.\n        # Exception: If we have a \"free lunch\" streak? \n        # In IPD, CC=3, CD=0, DC=5, DD=1.\n        # Mutual C is stable.\n        \n        # Probing: If we've been in a long streak of CC, occasionally defect to exploit?\n        # Risk: Triggers retaliation.\n        # Benefit: +5 vs +3 if they don't retaliate immediately or forgive quickly.\n        # With zero noise, TFT retaliates immediately. So probing against TFT yields D next turn.\n        # Sequence: C -> D (we get 5). Next: Opp D (TFT), We C? Or We D?\n        # If We D after their D: DD (1+1). \n        # If We C after their D: CD (0+5). Bad.\n        # Best response to D is D (DD=1) or C (CD=0). D is better short term, but prolongs feud.\n        \n        # Let's rely on the parent's strength: Generous TFT.\n        # If recent history is very clean (all C), maybe probe?\n        cc_streak = 0\n        for i in range(n-1, -1, -1):\n            if opp[i] == 'C' and me[i] == 'C':\n                cc_streak += 1\n            else:\n                break\n        \n        if cc_streak > 5 and rng.random() < 0.05:\n            return 'D'\n            \n        return 'C'\n\n    else:\n        # Last Opponent move was D.\n        # Did we provoke them? (caused_retaliation)\n        if caused_retaliation:\n            # They are punishing our previous D. \n            # To restore cooperation, we should probably cooperate (Forgiving TFT).\n            # But if we C now, and they are strict TFT, they will play D again?\n            # Strict TFT: I played D. You played C. I should play D? \n            # Wait. \n            # Round t-1: Me D, Opp C. Payoff: Me 5, Opp 0.\n            # Round t: Opp plays D (mirroring my D). \n            # If I play C: Payoff Me 0, Opp 5. Opp sees C.\n            # Round t+1: Opp plays C (mirroring my C).\n            # Round t+1 if I play C: Payoff 3,3.\n            # Total cost of restoring coop: lose round t (0 instead of 1 from DD).\n            # Alternative: Play D.\n            # Round t: Me D, Opp D. Payoff 1,1.\n            # Round t+1: Opp plays D (mirroring my D).\n            # This leads to a death spiral unless someone forgives.\n            \n            # So forgiving is key.\n            return 'C'\n        \n        # Otherwise, unprompted defection or continued hostility.\n        # If we weren't the one who started it, or it's an ALLD type:\n        \n        # Check if this is a \"glitch\" or single defection from a mostly cooperator.\n        # Parent logic: if recent C count high, forgive.\n        if recent_opp_d_count <= 1 and total_opp_d / n < 0.2:\n            # Likely accidental or minor dispute. Forgive.\n            # But wait, if they defected and we didn't, they are aggressive.\n            # If they are mostly nice, maybe give benefit of doubt.\n            return 'C'\n        \n        # If we've been cooperating and they just defected unexpectedly:\n        # Punish once.\n        if last_me == 'C':\n            return 'D'\n        \n        # If we were already defecting:\n        # Stay defecting until they cooperate.\n        return 'D'"
+  },
+  "parent_key": "a317b3702bce8f44941efd51e4bd02689621d531131ddf08fc68658ee823a9c5",
+  "valid": true,
+  "measured": {
+    "default": {
+      "status": "ok",
+      "score": 1.9722499999999998,
+      "cooperation": 0.481875,
+      "worst_score": 0.99,
+      "families": {
+        "recovery": 2.8586666666666667,
+        "exploitation": 1.6373333333333333,
+        "random": 2.0508333333333333,
+        "memory": 1.3421666666666667
+      },
+      "detail": {
+        "score": 197.225,
+        "cooperation": 0.481875,
+        "worst_score": 99.0,
+        "opponents": [
+          {
+            "opponent": "H_Recovery0",
+            "key": "35554e25b336f0f50832402247c978e1a44af943b589cdd814ada14e3619c232",
+            "score": 291.45,
+            "cooperation": 0.959
+          },
+          {
+            "opponent": "H_Exploitation0",
+            "key": "245905e8efc07151f023125e4ce7602aabbde0faa094f9c37899cffdc7479035",
+            "score": 99.0,
+            "cooperation": 0.01
+          },
+          {
+            "opponent": "H_Random0",
+            "key": "581f39edc983620e00ce3699456c6b185ca34f6a7facf00d2585c05e8235db2e",
+            "score": 144.75,
+            "cooperation": 0.1845
+          },
+          {
+            "opponent": "H_Memory0",
+            "key": "ef8a2ecaf9357334153734054ef3f9b8cbf0b18aee9b448091cc94f21c26f38d",
+            "score": 118.7,
+            "cooperation": 0.107
+          },
+          {
+            "opponent": "H_Recovery1",
+            "key": "6465c594d2b998dab5887f1eec0d43aac243f7f543585f533108c2eca172d81f",
+            "score": 281.65,
+            "cooperation": 0.9005
+          },
+          {
+            "opponent": "H_Exploitation1",
+            "key": "fc8d797be1b84cd9f4c9e438395f1a1b315378b65ceb051887cb76990905509f",
+            "score": 234.4,
+            "cooperation": 0.618
+          },
+          {
+            "opponent": "H_Random1",
+            "key": "76f6c31377be01145804e8a6cd2fcd9e71c530195d1e85d6e9aa4f67a15c9395",
+            "score": 204.15,
+            "cooperation": 0.521
+          },
+          {
+            "opponent": "H_Memory1",
+            "key": "cb806e27b23d2ced97aad9eb8a48d2fd4d8c11003a19f93c7a0191611280916f",
+            "score": 133.25,
+            "cooperation": 0.169
+          },
+          {
+            "opponent": "H_Recovery2",
+            "key": "6b847639f2ff5a02aa1b7fdb274dc06846964c2b090d535db02831c63d2b6641",
+            "score": 284.5,
+            "cooperation": 0.9085
+          },
+          {
+            "opponent": "H_Exploitation2",
+            "key": "336f7a8982761e16929e2ccebc9bc4dd797a8f09f2e5d7104f89f95464e96f9b",
+            "score": 157.8,
+            "cooperation": 0.301
+          },
+          {
+            "opponent": "H_Random2",
+            "key": "8cb80870bbdf12d28134633e8ae0d88e178f83353103b2fcd4acdb98874bca31",
+            "score": 266.35,
+            "cooperation": 0.8305
+          },
+          {
+            "opponent": "H_Memory2",
+            "key": "1d5010ac8c45319aa3470e0ccdf197a54a07d0985688b163c8e5ea256f365c1f",
+            "score": 150.7,
+            "cooperation": 0.2735
+          }
+        ]
+      }
+    },
+    "noise01": {
+      "status": "ok",
+      "score": 1.9789166666666669,
+      "cooperation": 0.49370833333333336,
+      "worst_score": 1.0170000000000001,
+      "families": {
+        "recovery": 2.799,
+        "exploitation": 1.6533333333333335,
+        "random": 2.0415,
+        "memory": 1.4218333333333333
+      },
+      "detail": {
+        "score": 197.89166666666668,
+        "cooperation": 0.49370833333333336,
+        "worst_score": 101.7,
+        "opponents": [
+          {
+            "opponent": "H_Recovery0",
+            "key": "35554e25b336f0f50832402247c978e1a44af943b589cdd814ada14e3619c232",
+            "score": 283.8,
+            "cooperation": 0.9295
+          },
+          {
+            "opponent": "H_Exploitation0",
+            "key": "245905e8efc07151f023125e4ce7602aabbde0faa094f9c37899cffdc7479035",
+            "score": 101.7,
+            "cooperation": 0.035
+          },
+          {
+            "opponent": "H_Random0",
+            "key": "581f39edc983620e00ce3699456c6b185ca34f6a7facf00d2585c05e8235db2e",
+            "score": 148.15,
+            "cooperation": 0.211
+          },
+          {
+            "opponent": "H_Memory0",
+            "key": "ef8a2ecaf9357334153734054ef3f9b8cbf0b18aee9b448091cc94f21c26f38d",
+            "score": 125.05,
+            "cooperation": 0.139
+          },
+          {
+            "opponent": "H_Recovery1",
+            "key": "6465c594d2b998dab5887f1eec0d43aac243f7f543585f533108c2eca172d81f",
+            "score": 275.3,
+            "cooperation": 0.8785000000000001
+          },
+          {
+            "opponent": "H_Exploitation1",
+            "key": "fc8d797be1b84cd9f4c9e438395f1a1b315378b65ceb051887cb76990905509f",
+            "score": 234.75,
+            "cooperation": 0.6185
+          },
+          {
+            "opponent": "H_Random1",
+            "key": "76f6c31377be01145804e8a6cd2fcd9e71c530195d1e85d6e9aa4f67a15c9395",
+            "score": 200.65,
+            "cooperation": 0.5275
+          },
+          {
+            "opponent": "H_Memory1",
+            "key": "cb806e27b23d2ced97aad9eb8a48d2fd4d8c11003a19f93c7a0191611280916f",
+            "score": 142.25,
+            "cooperation": 0.24
+          },
+          {
+            "opponent": "H_Recovery2",
+            "key": "6b847639f2ff5a02aa1b7fdb274dc06846964c2b090d535db02831c63d2b6641",
+            "score": 280.6,
+            "cooperation": 0.9015
+          },
+          {
+            "opponent": "H_Exploitation2",
+            "key": "336f7a8982761e16929e2ccebc9bc4dd797a8f09f2e5d7104f89f95464e96f9b",
+            "score": 159.55,
+            "cooperation": 0.318
+          },
+          {
+            "opponent": "H_Random2",
+            "key": "8cb80870bbdf12d28134633e8ae0d88e178f83353103b2fcd4acdb98874bca31",
+            "score": 263.65,
+            "cooperation": 0.804
+          },
+          {
+            "opponent": "H_Memory2",
+            "key": "1d5010ac8c45319aa3470e0ccdf197a54a07d0985688b163c8e5ea256f365c1f",
+            "score": 159.25,
+            "cooperation": 0.322
+          }
+        ]
+      }
+    },
+    "long": {
+      "status": "ok",
+      "score": 1.9617708333333335,
+      "cooperation": 0.4407083333333333,
+      "worst_score": 0.995,
+      "families": {
+        "recovery": 2.93,
+        "exploitation": 1.5360833333333332,
+        "random": 2.1344166666666666,
+        "memory": 1.2465833333333334
+      },
+      "detail": {
+        "score": 392.3541666666667,
+        "cooperation": 0.4407083333333333,
+        "worst_score": 199.0,
+        "opponents": [
+          {
+            "opponent": "H_Recovery0",
+            "key": "35554e25b336f0f50832402247c978e1a44af943b589cdd814ada14e3619c232",
+            "score": 591.0,
+            "cooperation": 0.97825
+          },
+          {
+            "opponent": "H_Exploitation0",
+            "key": "245905e8efc07151f023125e4ce7602aabbde0faa094f9c37899cffdc7479035",
+            "score": 199.0,
+            "cooperation": 0.005
+          },
+          {
+            "opponent": "H_Random0",
+            "key": "581f39edc983620e00ce3699456c6b185ca34f6a7facf00d2585c05e8235db2e",
+            "score": 312.05,
+            "cooperation": 0.10675
+          },
+          {
+            "opponent": "H_Memory0",
+            "key": "ef8a2ecaf9357334153734054ef3f9b8cbf0b18aee9b448091cc94f21c26f38d",
+            "score": 230.3,
+            "cooperation": 0.06025
+          },
+          {
+            "opponent": "H_Recovery1",
+            "key": "6465c594d2b998dab5887f1eec0d43aac243f7f543585f533108c2eca172d81f",
+            "score": 582.35,
+            "cooperation": 0.951
+          },
+          {
+            "opponent": "H_Exploitation1",
+            "key": "fc8d797be1b84cd9f4c9e438395f1a1b315378b65ceb051887cb76990905509f",
+            "score": 464.45,
+            "cooperation": 0.59875
+          },
+          {
+            "opponent": "H_Random1",
+            "key": "76f6c31377be01145804e8a6cd2fcd9e71c530195d1e85d6e9aa4f67a15c9395",
+            "score": 428.85,
+            "cooperation": 0.47050000000000003
+          },
+          {
+            "opponent": "H_Memory1",
+            "key": "cb806e27b23d2ced97aad9eb8a48d2fd4d8c11003a19f93c7a0191611280916f",
+            "score": 239.55,
+            "cooperation": 0.07425
+          },
+          {
+            "opponent": "H_Recovery2",
+            "key": "6b847639f2ff5a02aa1b7fdb274dc06846964c2b090d535db02831c63d2b6641",
+            "score": 584.65,
+            "cooperation": 0.9512499999999999
+          },
+          {
+            "opponent": "H_Exploitation2",
+            "key": "336f7a8982761e16929e2ccebc9bc4dd797a8f09f2e5d7104f89f95464e96f9b",
+            "score": 258.2,
+            "cooperation": 0.1495
+          },
+          {
+            "opponent": "H_Random2",
+            "key": "8cb80870bbdf12d28134633e8ae0d88e178f83353103b2fcd4acdb98874bca31",
+            "score": 539.75,
+            "cooperation": 0.79425
+          },
+          {
+            "opponent": "H_Memory2",
+            "key": "1d5010ac8c45319aa3470e0ccdf197a54a07d0985688b163c8e5ea256f365c1f",
+            "score": 278.1,
+            "cooperation": 0.14875
+          }
+        ]
+      }
+    },
+    "behavior": {
+      "status": "ok",
+      "probes": {
+        "controlled_two_D_TFT": {
+          "mean": {
+            "own_cooperation_first4": 0.9625,
+            "own_cooperation_after4": 0.9444444444444444,
+            "mutual_cooperation_last5": 0.89,
+            "own_cooperation_last5": 0.95,
+            "unilateral_cooperation_last5": 0.060000000000000005,
+            "score": 2.81,
+            "not_recovered": 0.0,
+            "recovery_time_capped": 7
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9722222222222222,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.825,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.8,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9722222222222222,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.825,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9722222222222222,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.825,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.775,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.775,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.775,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.775,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.8,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.8,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.9722222222222222,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.875,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.8,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.775,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.825,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9722222222222222,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.825,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.8,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.8,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9722222222222222,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.825,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            }
+          ]
+        },
+        "controlled_five_D_GTFT": {
+          "mean": {
+            "own_cooperation_first4": 0.975,
+            "own_cooperation_after4": 0.7125,
+            "mutual_cooperation_last5": 0.92,
+            "own_cooperation_last5": 0.96,
+            "unilateral_cooperation_last5": 0.04,
+            "score": 2.43,
+            "not_recovered": 0.05,
+            "recovery_time_capped": 12.5
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.375,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 13
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.675,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 8
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.45,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 11
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.7,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.6666666666666666,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.475,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 12
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.525,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 11
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.55,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 10
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.6666666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.275,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 15
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.6388888888888888,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.225,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 16
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8055555555555556,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 9
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8055555555555556,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.625,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 8
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8055555555555556,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.55,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 9
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.65,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.5555555555555556,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.15,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 18
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.6111111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.175,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 17
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.3888888888888889,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 1.925,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 26
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.5,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.175,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 20
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.6944444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.4,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 13
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.725,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.6944444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.425,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 13
+            }
+          ]
+        },
+        "controlled_three_D_ALLC": {
+          "mean": {
+            "own_cooperation_first4": 0.975,
+            "own_cooperation_after4": 0.9180555555555555,
+            "mutual_cooperation_last5": 0.97,
+            "own_cooperation_last5": 0.97,
+            "unilateral_cooperation_last5": 0,
+            "score": 2.90125,
+            "not_recovered": 0.0,
+            "recovery_time_capped": 6
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.925,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 3,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            }
+          ]
+        },
+        "controlled_sustained_D": {
+          "mean": {
+            "own_cooperation_first4": 0.9625,
+            "own_cooperation_after4": 0.08194444444444444,
+            "mutual_cooperation_last5": 0,
+            "own_cooperation_last5": 0,
+            "unilateral_cooperation_last5": 0,
+            "score": 1.20875
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.25
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.25
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.05555555555555555,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.225
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.25
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            }
+          ]
+        },
+        "controlled_periodic_D": {
+          "mean": {
+            "own_cooperation_first4": 0.975,
+            "own_cooperation_after4": 0.7486111111111111,
+            "mutual_cooperation_last5": 0.8,
+            "own_cooperation_last5": 1,
+            "unilateral_cooperation_last5": 0.2,
+            "score": 2.53125
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.575
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.575
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            }
+          ]
+        },
+        "natural_two_D_TFT": {
+          "mean": {
+            "own_cooperation_first4": 1,
+            "own_cooperation_after4": 0,
+            "mutual_cooperation_last5": 0,
+            "own_cooperation_last5": 0,
+            "unilateral_cooperation_last5": 0,
+            "score": 1.125,
+            "not_recovered": 1.0,
+            "recovery_time_capped": 35
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            }
+          ]
+        },
+        "natural_five_D_GTFT": {
+          "mean": {
+            "own_cooperation_first4": 1,
+            "own_cooperation_after4": 0.7027777777777778,
+            "mutual_cooperation_last5": 0.9,
+            "own_cooperation_last5": 0.95,
+            "unilateral_cooperation_last5": 0.05,
+            "score": 2.4425,
+            "not_recovered": 0.05,
+            "recovery_time_capped": 13.15
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.3611111111111111,
+              "mutual_cooperation_last5": 0.4,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.4,
+              "score": 1.8,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 26
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8055555555555556,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.675,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.625,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 8
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7777777777777778,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.5,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 10
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.5833333333333334,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.225,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 16
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7777777777777778,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.675,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 9
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8333333333333334,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.6,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 8
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.6666666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.35,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 18
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.5277777777777778,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.25,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 20
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8055555555555556,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.525,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 10
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.5555555555555556,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.225,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 17
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.5833333333333334,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.3,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 20
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.6111111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.25,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 20
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.525,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 10
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7777777777777778,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.7,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 8
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.525,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 11
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8333333333333334,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.7,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.65,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.4722222222222222,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.1,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 24
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.65,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            }
+          ]
+        },
+        "natural_three_D_ALLC": {
+          "mean": {
+            "own_cooperation_first4": 1,
+            "own_cooperation_after4": 0.9055555555555556,
+            "mutual_cooperation_last5": 0.9400000000000001,
+            "own_cooperation_last5": 0.9400000000000001,
+            "unilateral_cooperation_last5": 0,
+            "score": 2.92,
+            "not_recovered": 0.0,
+            "recovery_time_capped": 6
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 3,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 3,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            }
+          ]
+        },
+        "natural_sustained_D": {
+          "mean": {
+            "own_cooperation_first4": 1,
+            "own_cooperation_after4": 0.08333333333333333,
+            "mutual_cooperation_last5": 0,
+            "own_cooperation_last5": 0,
+            "unilateral_cooperation_last5": 0,
+            "score": 1.2
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            }
+          ]
+        },
+        "natural_periodic_D": {
+          "mean": {
+            "own_cooperation_first4": 1,
+            "own_cooperation_after4": 0.7222222222222222,
+            "mutual_cooperation_last5": 0.8,
+            "own_cooperation_last5": 1,
+            "unilateral_cooperation_last5": 0.2,
+            "score": 2.55
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            }
+          ]
+        }
+      }
+    }
+  },
+  "deployed": {
+    "default": {
+      "status": "ok",
+      "score": 1.9722499999999998,
+      "cooperation": 0.481875,
+      "worst_score": 0.99,
+      "families": {
+        "recovery": 2.8586666666666667,
+        "exploitation": 1.6373333333333333,
+        "random": 2.0508333333333333,
+        "memory": 1.3421666666666667
+      },
+      "detail": {
+        "score": 197.225,
+        "cooperation": 0.481875,
+        "worst_score": 99.0,
+        "opponents": [
+          {
+            "opponent": "H_Recovery0",
+            "key": "35554e25b336f0f50832402247c978e1a44af943b589cdd814ada14e3619c232",
+            "score": 291.45,
+            "cooperation": 0.959
+          },
+          {
+            "opponent": "H_Exploitation0",
+            "key": "245905e8efc07151f023125e4ce7602aabbde0faa094f9c37899cffdc7479035",
+            "score": 99.0,
+            "cooperation": 0.01
+          },
+          {
+            "opponent": "H_Random0",
+            "key": "581f39edc983620e00ce3699456c6b185ca34f6a7facf00d2585c05e8235db2e",
+            "score": 144.75,
+            "cooperation": 0.1845
+          },
+          {
+            "opponent": "H_Memory0",
+            "key": "ef8a2ecaf9357334153734054ef3f9b8cbf0b18aee9b448091cc94f21c26f38d",
+            "score": 118.7,
+            "cooperation": 0.107
+          },
+          {
+            "opponent": "H_Recovery1",
+            "key": "6465c594d2b998dab5887f1eec0d43aac243f7f543585f533108c2eca172d81f",
+            "score": 281.65,
+            "cooperation": 0.9005
+          },
+          {
+            "opponent": "H_Exploitation1",
+            "key": "fc8d797be1b84cd9f4c9e438395f1a1b315378b65ceb051887cb76990905509f",
+            "score": 234.4,
+            "cooperation": 0.618
+          },
+          {
+            "opponent": "H_Random1",
+            "key": "76f6c31377be01145804e8a6cd2fcd9e71c530195d1e85d6e9aa4f67a15c9395",
+            "score": 204.15,
+            "cooperation": 0.521
+          },
+          {
+            "opponent": "H_Memory1",
+            "key": "cb806e27b23d2ced97aad9eb8a48d2fd4d8c11003a19f93c7a0191611280916f",
+            "score": 133.25,
+            "cooperation": 0.169
+          },
+          {
+            "opponent": "H_Recovery2",
+            "key": "6b847639f2ff5a02aa1b7fdb274dc06846964c2b090d535db02831c63d2b6641",
+            "score": 284.5,
+            "cooperation": 0.9085
+          },
+          {
+            "opponent": "H_Exploitation2",
+            "key": "336f7a8982761e16929e2ccebc9bc4dd797a8f09f2e5d7104f89f95464e96f9b",
+            "score": 157.8,
+            "cooperation": 0.301
+          },
+          {
+            "opponent": "H_Random2",
+            "key": "8cb80870bbdf12d28134633e8ae0d88e178f83353103b2fcd4acdb98874bca31",
+            "score": 266.35,
+            "cooperation": 0.8305
+          },
+          {
+            "opponent": "H_Memory2",
+            "key": "1d5010ac8c45319aa3470e0ccdf197a54a07d0985688b163c8e5ea256f365c1f",
+            "score": 150.7,
+            "cooperation": 0.2735
+          }
+        ]
+      }
+    },
+    "noise01": {
+      "status": "ok",
+      "score": 1.9789166666666669,
+      "cooperation": 0.49370833333333336,
+      "worst_score": 1.0170000000000001,
+      "families": {
+        "recovery": 2.799,
+        "exploitation": 1.6533333333333335,
+        "random": 2.0415,
+        "memory": 1.4218333333333333
+      },
+      "detail": {
+        "score": 197.89166666666668,
+        "cooperation": 0.49370833333333336,
+        "worst_score": 101.7,
+        "opponents": [
+          {
+            "opponent": "H_Recovery0",
+            "key": "35554e25b336f0f50832402247c978e1a44af943b589cdd814ada14e3619c232",
+            "score": 283.8,
+            "cooperation": 0.9295
+          },
+          {
+            "opponent": "H_Exploitation0",
+            "key": "245905e8efc07151f023125e4ce7602aabbde0faa094f9c37899cffdc7479035",
+            "score": 101.7,
+            "cooperation": 0.035
+          },
+          {
+            "opponent": "H_Random0",
+            "key": "581f39edc983620e00ce3699456c6b185ca34f6a7facf00d2585c05e8235db2e",
+            "score": 148.15,
+            "cooperation": 0.211
+          },
+          {
+            "opponent": "H_Memory0",
+            "key": "ef8a2ecaf9357334153734054ef3f9b8cbf0b18aee9b448091cc94f21c26f38d",
+            "score": 125.05,
+            "cooperation": 0.139
+          },
+          {
+            "opponent": "H_Recovery1",
+            "key": "6465c594d2b998dab5887f1eec0d43aac243f7f543585f533108c2eca172d81f",
+            "score": 275.3,
+            "cooperation": 0.8785000000000001
+          },
+          {
+            "opponent": "H_Exploitation1",
+            "key": "fc8d797be1b84cd9f4c9e438395f1a1b315378b65ceb051887cb76990905509f",
+            "score": 234.75,
+            "cooperation": 0.6185
+          },
+          {
+            "opponent": "H_Random1",
+            "key": "76f6c31377be01145804e8a6cd2fcd9e71c530195d1e85d6e9aa4f67a15c9395",
+            "score": 200.65,
+            "cooperation": 0.5275
+          },
+          {
+            "opponent": "H_Memory1",
+            "key": "cb806e27b23d2ced97aad9eb8a48d2fd4d8c11003a19f93c7a0191611280916f",
+            "score": 142.25,
+            "cooperation": 0.24
+          },
+          {
+            "opponent": "H_Recovery2",
+            "key": "6b847639f2ff5a02aa1b7fdb274dc06846964c2b090d535db02831c63d2b6641",
+            "score": 280.6,
+            "cooperation": 0.9015
+          },
+          {
+            "opponent": "H_Exploitation2",
+            "key": "336f7a8982761e16929e2ccebc9bc4dd797a8f09f2e5d7104f89f95464e96f9b",
+            "score": 159.55,
+            "cooperation": 0.318
+          },
+          {
+            "opponent": "H_Random2",
+            "key": "8cb80870bbdf12d28134633e8ae0d88e178f83353103b2fcd4acdb98874bca31",
+            "score": 263.65,
+            "cooperation": 0.804
+          },
+          {
+            "opponent": "H_Memory2",
+            "key": "1d5010ac8c45319aa3470e0ccdf197a54a07d0985688b163c8e5ea256f365c1f",
+            "score": 159.25,
+            "cooperation": 0.322
+          }
+        ]
+      }
+    },
+    "long": {
+      "status": "ok",
+      "score": 1.9617708333333335,
+      "cooperation": 0.4407083333333333,
+      "worst_score": 0.995,
+      "families": {
+        "recovery": 2.93,
+        "exploitation": 1.5360833333333332,
+        "random": 2.1344166666666666,
+        "memory": 1.2465833333333334
+      },
+      "detail": {
+        "score": 392.3541666666667,
+        "cooperation": 0.4407083333333333,
+        "worst_score": 199.0,
+        "opponents": [
+          {
+            "opponent": "H_Recovery0",
+            "key": "35554e25b336f0f50832402247c978e1a44af943b589cdd814ada14e3619c232",
+            "score": 591.0,
+            "cooperation": 0.97825
+          },
+          {
+            "opponent": "H_Exploitation0",
+            "key": "245905e8efc07151f023125e4ce7602aabbde0faa094f9c37899cffdc7479035",
+            "score": 199.0,
+            "cooperation": 0.005
+          },
+          {
+            "opponent": "H_Random0",
+            "key": "581f39edc983620e00ce3699456c6b185ca34f6a7facf00d2585c05e8235db2e",
+            "score": 312.05,
+            "cooperation": 0.10675
+          },
+          {
+            "opponent": "H_Memory0",
+            "key": "ef8a2ecaf9357334153734054ef3f9b8cbf0b18aee9b448091cc94f21c26f38d",
+            "score": 230.3,
+            "cooperation": 0.06025
+          },
+          {
+            "opponent": "H_Recovery1",
+            "key": "6465c594d2b998dab5887f1eec0d43aac243f7f543585f533108c2eca172d81f",
+            "score": 582.35,
+            "cooperation": 0.951
+          },
+          {
+            "opponent": "H_Exploitation1",
+            "key": "fc8d797be1b84cd9f4c9e438395f1a1b315378b65ceb051887cb76990905509f",
+            "score": 464.45,
+            "cooperation": 0.59875
+          },
+          {
+            "opponent": "H_Random1",
+            "key": "76f6c31377be01145804e8a6cd2fcd9e71c530195d1e85d6e9aa4f67a15c9395",
+            "score": 428.85,
+            "cooperation": 0.47050000000000003
+          },
+          {
+            "opponent": "H_Memory1",
+            "key": "cb806e27b23d2ced97aad9eb8a48d2fd4d8c11003a19f93c7a0191611280916f",
+            "score": 239.55,
+            "cooperation": 0.07425
+          },
+          {
+            "opponent": "H_Recovery2",
+            "key": "6b847639f2ff5a02aa1b7fdb274dc06846964c2b090d535db02831c63d2b6641",
+            "score": 584.65,
+            "cooperation": 0.9512499999999999
+          },
+          {
+            "opponent": "H_Exploitation2",
+            "key": "336f7a8982761e16929e2ccebc9bc4dd797a8f09f2e5d7104f89f95464e96f9b",
+            "score": 258.2,
+            "cooperation": 0.1495
+          },
+          {
+            "opponent": "H_Random2",
+            "key": "8cb80870bbdf12d28134633e8ae0d88e178f83353103b2fcd4acdb98874bca31",
+            "score": 539.75,
+            "cooperation": 0.79425
+          },
+          {
+            "opponent": "H_Memory2",
+            "key": "1d5010ac8c45319aa3470e0ccdf197a54a07d0985688b163c8e5ea256f365c1f",
+            "score": 278.1,
+            "cooperation": 0.14875
+          }
+        ]
+      }
+    },
+    "behavior": {
+      "status": "ok",
+      "probes": {
+        "controlled_two_D_TFT": {
+          "mean": {
+            "own_cooperation_first4": 0.9625,
+            "own_cooperation_after4": 0.9444444444444444,
+            "mutual_cooperation_last5": 0.89,
+            "own_cooperation_last5": 0.95,
+            "unilateral_cooperation_last5": 0.060000000000000005,
+            "score": 2.81,
+            "not_recovered": 0.0,
+            "recovery_time_capped": 7
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9722222222222222,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.825,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.8,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9722222222222222,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.825,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9722222222222222,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.825,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.775,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.775,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.775,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.775,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.8,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.8,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.9722222222222222,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.875,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.8,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.775,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.825,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9722222222222222,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.825,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.8,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.8,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9722222222222222,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.825,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            }
+          ]
+        },
+        "controlled_five_D_GTFT": {
+          "mean": {
+            "own_cooperation_first4": 0.975,
+            "own_cooperation_after4": 0.7125,
+            "mutual_cooperation_last5": 0.92,
+            "own_cooperation_last5": 0.96,
+            "unilateral_cooperation_last5": 0.04,
+            "score": 2.43,
+            "not_recovered": 0.05,
+            "recovery_time_capped": 12.5
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.375,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 13
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.675,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 8
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.45,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 11
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.7,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.6666666666666666,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.475,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 12
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.525,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 11
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.55,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 10
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.6666666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.275,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 15
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.6388888888888888,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.225,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 16
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8055555555555556,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 9
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8055555555555556,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.625,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 8
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8055555555555556,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.55,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 9
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.65,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.5555555555555556,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.15,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 18
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.6111111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.175,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 17
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.3888888888888889,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 1.925,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 26
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.5,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.175,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 20
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.6944444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.4,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 13
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.725,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.6944444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.425,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 13
+            }
+          ]
+        },
+        "controlled_three_D_ALLC": {
+          "mean": {
+            "own_cooperation_first4": 0.975,
+            "own_cooperation_after4": 0.9180555555555555,
+            "mutual_cooperation_last5": 0.97,
+            "own_cooperation_last5": 0.97,
+            "unilateral_cooperation_last5": 0,
+            "score": 2.90125,
+            "not_recovered": 0.0,
+            "recovery_time_capped": 6
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.925,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 3,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            }
+          ]
+        },
+        "controlled_sustained_D": {
+          "mean": {
+            "own_cooperation_first4": 0.9625,
+            "own_cooperation_after4": 0.08194444444444444,
+            "mutual_cooperation_last5": 0,
+            "own_cooperation_last5": 0,
+            "unilateral_cooperation_last5": 0,
+            "score": 1.20875
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.25
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.25
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.05555555555555555,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.225
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.25
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            }
+          ]
+        },
+        "controlled_periodic_D": {
+          "mean": {
+            "own_cooperation_first4": 0.975,
+            "own_cooperation_after4": 0.7486111111111111,
+            "mutual_cooperation_last5": 0.8,
+            "own_cooperation_last5": 1,
+            "unilateral_cooperation_last5": 0.2,
+            "score": 2.53125
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.575
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 0.75,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.575
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.525
+            }
+          ]
+        },
+        "natural_two_D_TFT": {
+          "mean": {
+            "own_cooperation_first4": 1,
+            "own_cooperation_after4": 0,
+            "mutual_cooperation_last5": 0,
+            "own_cooperation_last5": 0,
+            "unilateral_cooperation_last5": 0,
+            "score": 1.125,
+            "not_recovered": 1.0,
+            "recovery_time_capped": 35
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.125,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 35
+            }
+          ]
+        },
+        "natural_five_D_GTFT": {
+          "mean": {
+            "own_cooperation_first4": 1,
+            "own_cooperation_after4": 0.7027777777777778,
+            "mutual_cooperation_last5": 0.9,
+            "own_cooperation_last5": 0.95,
+            "unilateral_cooperation_last5": 0.05,
+            "score": 2.4425,
+            "not_recovered": 0.05,
+            "recovery_time_capped": 13.15
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.3611111111111111,
+              "mutual_cooperation_last5": 0.4,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.4,
+              "score": 1.8,
+              "not_recovered": 1.0,
+              "recovery_time_capped": 26
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8055555555555556,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.675,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.625,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 8
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7777777777777778,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.5,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 10
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.5833333333333334,
+              "mutual_cooperation_last5": 0.6,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.225,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 16
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7777777777777778,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.675,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 9
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8333333333333334,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.6,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 8
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.6666666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.35,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 18
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.5277777777777778,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.25,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 20
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8055555555555556,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.525,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 10
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.5555555555555556,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.225,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 17
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.5833333333333334,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.3,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 20
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.6111111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.25,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 20
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.525,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 10
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7777777777777778,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.7,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 8
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.75,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.525,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 11
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8333333333333334,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.7,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.65,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.4722222222222222,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.1,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 24
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.65,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 7
+            }
+          ]
+        },
+        "natural_three_D_ALLC": {
+          "mean": {
+            "own_cooperation_first4": 1,
+            "own_cooperation_after4": 0.9055555555555556,
+            "mutual_cooperation_last5": 0.9400000000000001,
+            "own_cooperation_last5": 0.9400000000000001,
+            "unilateral_cooperation_last5": 0,
+            "score": 2.92,
+            "not_recovered": 0.0,
+            "recovery_time_capped": 6
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 3,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8611111111111112,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 3,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.8888888888888888,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.95,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 0.8,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9166666666666666,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.9,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.9444444444444444,
+              "mutual_cooperation_last5": 1,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0,
+              "score": 2.85,
+              "not_recovered": 0.0,
+              "recovery_time_capped": 6
+            }
+          ]
+        },
+        "natural_sustained_D": {
+          "mean": {
+            "own_cooperation_first4": 1,
+            "own_cooperation_after4": 0.08333333333333333,
+            "mutual_cooperation_last5": 0,
+            "own_cooperation_last5": 0,
+            "unilateral_cooperation_last5": 0,
+            "score": 1.2
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.08333333333333333,
+              "mutual_cooperation_last5": 0,
+              "own_cooperation_last5": 0,
+              "unilateral_cooperation_last5": 0,
+              "score": 1.2
+            }
+          ]
+        },
+        "natural_periodic_D": {
+          "mean": {
+            "own_cooperation_first4": 1,
+            "own_cooperation_after4": 0.7222222222222222,
+            "mutual_cooperation_last5": 0.8,
+            "own_cooperation_last5": 1,
+            "unilateral_cooperation_last5": 0.2,
+            "score": 2.55
+          },
+          "runs": [
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            },
+            {
+              "own_cooperation_first4": 1,
+              "own_cooperation_after4": 0.7222222222222222,
+              "mutual_cooperation_last5": 0.8,
+              "own_cooperation_last5": 1,
+              "unilateral_cooperation_last5": 0.2,
+              "score": 2.55
+            }
+          ]
+        }
+      }
+    }
+  },
+  "fallback": {
+    "default": false,
+    "noise01": false,
+    "long": false,
+    "behavior": false
+  },
+  "delta": {
+    "default": {
+      "score": 0.02558333333333307,
+      "cooperation": 0.052791666666666626,
+      "worst_score": 0.010000000000000009
+    },
+    "noise01": {
+      "score": 0.05066666666666708,
+      "cooperation": 0.07750000000000001,
+      "worst_score": -0.0014999999999998348
+    },
+    "long": {
+      "score": 0.031083333333333574,
+      "cooperation": 0.22308333333333333,
+      "worst_score": 0.0050000000000000044
+    }
+  }
+}

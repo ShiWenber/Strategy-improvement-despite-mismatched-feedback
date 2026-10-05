@@ -9,7 +9,7 @@ import numpy as np
 
 from .core import Policy, digest
 from .run import read_json, write_json
-from .specificity import (DEFAULT_ROOT, check_manifest, init_prompt, choose, seal_selections)
+from .specificity import (DEFAULT_ROOT, init_prompt, choose, seal_selections)
 from .specificity_assets import ARMS, SEEDS, RANKS
 
 
@@ -84,7 +84,7 @@ def audit(root, manifest):
                     issues.append(job['id'] + ': delta mismatch')
                 if outcome['fallback'][setting] and abs(delta) > 1e-10:
                     issues.append(job['id'] + ': fallback mismatch')
-    selected = seal_selections(root, manifest)
+    selected = seal_selections(root, manifest, readonly=True)
     release = read_json(root / 'H_RELEASED.json')
     if release['selection_digest'] != digest((root / 'SELECTIONS_SEALED.json').read_text(encoding='utf-8')):
         issues.append('Selection seal does not match holdout release')
@@ -125,7 +125,7 @@ def behavior_delta(row, parent):
 
 def analyze(root):
     root = Path(root)
-    manifest = check_manifest(root)
+    manifest = read_json(root / 'manifest.json')
     read_json(root / 'COMPLETE.json')
     audit_result = audit(root, manifest)
     write_json(root / 'AUDIT.json', audit_result)

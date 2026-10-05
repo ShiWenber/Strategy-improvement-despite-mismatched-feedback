@@ -317,7 +317,7 @@ def choose(parent, children, rule):
     return {'winner': best, 'score': value, 'accepted': best is not None}
 
 
-def seal_selections(root, manifest):
+def seal_selections(root, manifest, *, readonly=False):
     root = Path(root)
     rows = []
     for seed in SEEDS:
@@ -330,12 +330,13 @@ def seal_selections(root, manifest):
                              read_json(root / 'selection_scores' / (j['id'] + '.json'))) for j in jobs]
                 for rule in ('S1', 'S2', 'S3'):
                     rows.append({'context': cid, 'seed': seed, 'arm': arm, 'rule': rule, **choose(parent, children, rule)})
-    result = {'rows': rows, 'implementation_hash': source_hash(),
+    result = {'rows': rows, 'implementation_hash': manifest['implementation_hash'] if readonly else source_hash(),
               'candidate_hashes': {j['id']: digest((root / 'candidates' / (j['id'] + '.json')).read_text(encoding='utf-8')) for j in manifest['jobs']}}
     path = root / 'SELECTIONS_SEALED.json'
     if path.exists() and read_json(path) != result:
         raise RuntimeError('Selections changed after sealing')
-    write_json(path, result)
+    if not readonly:
+        write_json(path, result)
     return result
 
 
