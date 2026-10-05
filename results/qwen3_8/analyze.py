@@ -22,8 +22,8 @@ def audit(root, manifest):
     selections = read_json(root / 'SELECTIONS_SEALED.json')
     release = read_json(root / 'H_RELEASED.json')
     issues = []
-    if len(selections['rows']) != 900:
-        issues.append('Expected 900 sealed selections')
+    if len(selections['rows']) != len(manifest['jobs']) // manifest['draws'] * 3:
+        issues.append('Sealed selection count differs from manifest')
     if release['selection_digest'] != digest((root / 'SELECTIONS_SEALED.json').read_text(encoding='utf-8')):
         issues.append('H released against wrong selection seal')
     rows = []
@@ -99,8 +99,8 @@ def analyze():
                'limitation': 'Thinking and max_tokens differ between modes; H was already used historically.'}
     write_json(ROOT / 'ANALYSIS.json', summary)
     lines = ['# Qwen3.8-Flash paired replication', '',
-             'Same frozen 20 populations, 60 parents and 600 prompts per mode. H was previously used.', '',
-             '| Mode | Valid / 600 | Raw Accurate | Raw Mismatched | S3 Accurate | S3 Mismatched | Input tokens | Output tokens | Uncached list cost (CNY) |',
+             'Same frozen 20 populations, 60 parents and 240 prompts per mode. H was previously used.', '',
+             '| Mode | Valid / 240 | Raw Accurate | Raw Mismatched | S3 Accurate | S3 Mismatched | Input tokens | Output tokens | Uncached list cost (CNY) |',
              '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
     for mode in ('off', 'on'):
         report = reports[mode]

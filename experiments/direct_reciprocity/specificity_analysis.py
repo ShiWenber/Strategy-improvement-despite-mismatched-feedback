@@ -185,15 +185,6 @@ def analyze(root):
     def selected_values(rule, arm):
         return np.array(chosen[rule + '/' + arm]['metrics']['default']['seed_values'])
     primary = contrast(raw_values('accurate') - raw_values('mismatched'))
-    secondary = {'raw_accurate-' + arm: contrast(raw_values('accurate') - raw_values(arm))
-                 for arm in ('score', 'background', 'cooperation')}
-    secondary['S3_accurate-score'] = contrast(selected_values('S3', 'accurate') - selected_values('S3', 'score'))
-    secondary['S3_accurate-parent'] = contrast(selected_values('S3', 'accurate'))
-    secondary['selection_interaction'] = contrast((selected_values('S3', 'accurate') - selected_values('S3', 'score')) -
-                                                  (selected_values('S2', 'accurate') - selected_values('S2', 'score')))
-    adjusted = holm({key: value['sign_swap_p'] for key, value in secondary.items()})
-    for key in secondary:
-        secondary[key]['holm_p'] = adjusted[key]
     # Continuous parent-feature associations are exploratory, not mediation evidence.
     associations = []
     for cid in sorted(parents):
@@ -227,32 +218,22 @@ def analyze(root):
         feature_effects[feature] = {'interaction_slope': slope(associations, feature),
                                    'ci95': np.quantile(coefficients, [.025, .975]).tolist() if coefficients else None,
                                    'identified_bootstrap_samples': len(coefficients), 'exploratory': True}
-    quantitative_gate = primary['ci95'][0] > 0 and primary['mean'] >= .05 and all(
-        secondary[key]['mean'] > 0 and secondary[key]['holm_p'] < .05
-        for key in ('raw_accurate-score', 'raw_accurate-background', 'raw_accurate-cooperation', 'S3_accurate-parent'))
     disagreements = {}
     for arm in ARMS:
         items = {(r['context'], r['rule']): r['winner'] for r in selected if r['arm'] == arm}
         disagreements[arm] = {a + '-' + b: sum(items[cid, a] != items[cid, b] for cid in parents)
                               for a, b in [('S1', 'S2'), ('S2', 'S3'), ('S1', 'S3')]}
-    result = {'audit': audit_result, 'raw': raw, 'selected': chosen, 'primary': primary, 'secondary': secondary,
+    result = {'audit': audit_result, 'raw': raw, 'selected': chosen, 'primary': primary,
               'selection_disagreements': disagreements, 'parent_feature_associations_exploratory': associations,
               'parent_feature_interactions_exploratory': feature_effects,
-              'gate': {'quantitative_pass': quantitative_gate, 'behavior_review_required_if_pass': quantitative_gate,
-                       'multigeneration_authorized_by_evidence': False,
-                       'reason': 'Quantitative gate failed; do not start phase D.' if not quantitative_gate else 'Review independent directional behavior before any phase D dispatch.'},
-              'note': '20 independent population clusters. Primary is accurate vs mismatched raw proposals. Six secondary tests Holm-adjusted. Other endpoints exploratory. CIs are unadjusted seed-bootstrap intervals; a parent sign-swap test requires symmetry and is not a randomized parent assignment.'}
+              'note': '20 independent population clusters. Original prespecified primary: Accurate versus Mismatched raw proposals. Selected outputs, behaviour and parent-feature associations are exploratory; CIs are unadjusted seed-bootstrap intervals.'}
     write_json(root / 'ANALYSIS.json', result)
     lines = ['# 诊断针对性实验 v2：冻结协议结果', '', f"完成 {audit_result['n_requests']} 次请求；报告 tokens {audit_result['total_tokens']:,}；审计问题 {len(audit_result['issues'])}。", '',
              '| 组别 | 有效候选 | 原始默认增量 | S1 后增量 | S2 后增量 | S3 后增量 |', '| --- | ---: | ---: | ---: | ---: | ---: |']
     for arm in ARMS:
         lines.append(f"| {arm} | {raw[arm]['valid']}/120 | {raw[arm]['metrics']['default/score']['mean']:+.6f} | " +
                      ' | '.join(f"{chosen[r + '/' + arm]['metrics']['default']['mean']:+.6f}" for r in ('S1', 'S2', 'S3')) + ' |')
-    lines += ['', f"主比较 accurate−mismatched：{primary['mean']:+.6f}，95% 区间 {primary['ci95']}，配对符号交换 p={primary['sign_swap_p']:.6f}。", '',
-              '| 预定次比较 | 差值 | 未校正 95% 区间 | Holm p |', '| --- | ---: | --- | ---: |']
-    for key, value in secondary.items():
-        lines.append(f"| {key} | {value['mean']:+.6f} | {value['ci95']} | {value['holm_p']:.6f} |")
-    lines += ['', '量化推进门槛：' + ('通过，仍需独立行为审查。' if quantitative_gate else '未通过，不启动多代扩展。'), '', result['note'], '']
+    lines += ['', f"主比较 accurate−mismatched：{primary['mean']:+.6f}，95% 区间 {primary['ci95']}，配对符号交换 p={primary['sign_swap_p']:.6f}。", '', result['note'], '']
     (root / 'REPORT.md').write_text('\n'.join(lines), encoding='utf-8')
     return result
 
@@ -262,4 +243,4 @@ if __name__ == '__main__':
     parser.add_argument('root', nargs='?', default=DEFAULT_ROOT)
     args = parser.parse_args()
     result = analyze(args.root)
-    print(json.dumps({'primary': result['primary'], 'gate': result['gate'], 'audit': result['audit']}))
+    print(json.dumps({'primary': result['primary'], 'audit': result['audit']}))

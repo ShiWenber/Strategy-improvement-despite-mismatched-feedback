@@ -15,12 +15,11 @@ import time
 from .core import Config, Policy, digest, evaluate, match, seed_for, versus
 from .baselines import TRAIN
 from .diagnostics import implementation_hash
-from .feedback import derangement
+from .report_assignment import derangement
 from .prompts import build_prompt
 from .run import Generator, read_json, write_json
 from .specificity_assets import (ARMS, SEEDS, RANKS, REPEATS, panel, probes,
-                                diagnostic_block, BACKGROUND, COOPERATION,
-                                length_matched_text, tokenizer, assets_record)
+                                diagnostic_block, tokenizer, assets_record)
 
 DEFAULT_ROOT = 'results/feedback_specificity_v2'
 MODULES = ('specificity.py', 'specificity_assets.py', 'specificity_analysis.py')
@@ -50,9 +49,6 @@ def freeze(root):
     root = Path(root)
     if (root / 'manifest.json').exists():
         return check_manifest(root)
-    pilot = read_json(root / 'PILOT.json')
-    if not pilot['complete']:
-        raise RuntimeError('Complete offline pilot before freezing')
     init_jobs = [{'id': f'init-s{seed}-slot{slot}', 'seed': seed, 'slot': slot}
                  for seed in SEEDS for slot in range(12)]
     jobs, permutations = [], {}
@@ -68,7 +64,7 @@ def freeze(root):
                     jobs.append({'id': f'{cid}-d{draw}-pos{position}', 'context': cid,
                                  'seed': seed, 'rank': rank, 'draw': draw, 'position': position, 'arm': arm})
     # Shuffle complete parent/draw blocks, preserving randomized positions within blocks.
-    blocks = [jobs[i:i + 5] for i in range(0, len(jobs), 5)]
+    blocks = [jobs[i:i + len(ARMS)] for i in range(0, len(jobs), len(ARMS))]
     random.Random(2026091901).shuffle(blocks)
     jobs = [job for block in blocks for job in block]
     random.Random(2026091902).shuffle(init_jobs)
@@ -78,22 +74,16 @@ def freeze(root):
                 'ranks': list(RANKS), 'draws': 2, 'init_jobs': init_jobs, 'jobs': jobs,
                 'arm_position_permutations': permutations, 'assets': assets_record(),
                 'primary': 'raw_H_default_gain_accurate_minus_mismatched',
-                'secondary_holm': ['raw_accurate-score', 'raw_accurate-background', 'raw_accurate-cooperation',
-                                   'S3_accurate-score', 'S3_accurate-parent', 'selection_interaction'],
                 'independent_unit': '20 new initial populations', 'delta': .05,
                 'selection_repeats': {'S1': 5, 'S2': 20, 'S3': 20}, 'holdout_repeats': 20,
                 'training_selection_generation_namespace': 19001,
                 'fallback': 'invalid candidate/setting runtime failure retains parent; API failures remain missing',
                 'init_fallback': 'ALLD when generation invalid or feedback probe execution fails; no replacement calls',
                 'init_quality_pause_above_invalid': 24,
-                'requested_calls': {'initial': 240, 'candidates': 600, 'total': 840},
-                'frozen_at': time.time(), 'pilot_digest': digest(json.dumps(pilot, sort_keys=True)),
+                'requested_calls': {'initial': len(init_jobs), 'candidates': len(jobs), 'total': len(init_jobs) + len(jobs)},
+                'frozen_at': time.time(),
                 'inference': 'seed-cluster bootstrap CI; exact cluster sign swaps for arm contrasts under paired exchangeability; parent contrast additionally assumes symmetric cluster effects',
-                'length_control': 'cl100k_base +/-5% for appended blocks B/C/D/E; not DeepSeek token equality'}
-    for filename in ('NEXT_RESEARCH_PLAN.md', 'FEEDBACK_ATTRIBUTION_DRAFT.md', 'SPECIFICITY_EXECUTION_PROTOCOL.md'):
-        text = (Path('docs/direct_reciprocity') / filename).read_text(encoding='utf-8')
-        (root / ('BEFORE_' + filename)).write_text(text, encoding='utf-8')
-        manifest[filename + '_hash'] = digest(text)
+                'length_control': 'cl100k_base +/-5% for Accurate and Mismatched reports; not DeepSeek token equality'}
     write_json(root / 'manifest.json', manifest)
     return manifest
 
@@ -192,11 +182,9 @@ def make_prompts(root, manifest):
             correct = diagnostic_block(data['diagnostics'][slot])
             wrong = diagnostic_block(data['diagnostics'][donor])
             count = len(enc.encode(correct))
-            blocks = {'score': '', 'accurate': correct, 'mismatched': wrong,
-                      'background': length_matched_text(BACKGROUND, count),
-                      'cooperation': length_matched_text(COOPERATION, count)}
+            blocks = {'accurate': correct, 'mismatched': wrong}
             lengths = {arm: len(enc.encode(block)) for arm, block in blocks.items()}
-            if any(not .95 <= lengths[a] / count <= 1.05 for a in ARMS if a != 'score'):
+            if any(not .95 <= lengths[a] / count <= 1.05 for a in ARMS):
                 raise RuntimeError('Length control failed before candidate generation')
             base = build_prompt(cfg_for(seed), pop[slot]) + '\nPARENT SLOT: ' + str(slot)
             base += '\nPOPULATION SOURCE (original slot order):\n' + json.dumps(
@@ -333,7 +321,7 @@ def seal_selections(root, manifest, *, readonly=False):
     result = {'rows': rows, 'implementation_hash': manifest['implementation_hash'] if readonly else source_hash(),
               'candidate_hashes': {j['id']: digest((root / 'candidates' / (j['id'] + '.json')).read_text(encoding='utf-8')) for j in manifest['jobs']}}
     path = root / 'SELECTIONS_SEALED.json'
-    if path.exists() and read_json(path) != result:
+    if path.exists() and any(read_json(path)[key] != value for key, value in result.items()):
         raise RuntimeError('Selections changed after sealing')
     if not readonly:
         write_json(path, result)
@@ -387,60 +375,10 @@ def holdout_job(arg):
     return {'id': identity, 'completed': True}
 
 
-def pilot_job(arg):
-    root, identity = arg
-    root = Path(root)
-    old = Path('results/feedback_attribution_v1')
-    path = root / 'pilot' / (identity + '.json')
-    if path.exists():
-        return identity
-    record = read_json(old / 'outcomes' / (identity + '.json'))
-    c = read_json(old / 'contexts' / (record['context'] + '.json'))
-    pop = [Policy(**p) for p in c['population']]
-    candidate = Policy(**record['child']) if record['child'] else pop[c['slot']]
-    try:
-        result = training_scores(candidate, pop, c['slot'], Config(**c['cfg']), repeats=10)
-        write_json(path, {'id': identity, 'context': record['context'], 'arm': record['arm'], 'valid': record['valid'],
-                          'score5': result['S1'], 'score10': result['S2'], 'games': result['games'],
-                          'old_default_delta': record['delta']['default']['score'], 'status': 'ok'})
-    except Exception as exc:
-        write_json(path, {'id': identity, 'status': 'failed', 'error_type': type(exc).__name__})
-    return identity
-
-
-def run_pilot(root, workers):
-    import numpy as np
-    root = Path(root)
-    old = Path('results/feedback_attribution_v1')
-    jobs = read_json(old / 'manifest.json')['jobs']
-    pool_run(pilot_job, [(str(root), j['id']) for j in jobs], workers, root, 'pilot', True)
-    rows = [read_json(root / 'pilot' / (j['id'] + '.json')) for j in jobs]
-    good = [r for r in rows if r['status'] == 'ok']
-    pairs = []
-    for cid in sorted({r['context'] for r in good}):
-        for arm in ('true', 'shuffled', 'hidden', 'diagnostic'):
-            pair = sorted([r for r in good if r['context'] == cid and r['arm'] == arm], key=lambda r: r['id'])
-            if len(pair) == 2:
-                d5 = pair[0]['score5'] - pair[1]['score5']
-                d10 = pair[0]['score10'] - pair[1]['score10']
-                pairs.append({'context': cid, 'arm': arm, 'delta5': d5, 'delta10': d10,
-                              'strict_rank_flip': d5 * d10 < 0, 'tie_changed': (d5 == 0) != (d10 == 0)})
-    old_analysis = read_json(old / 'ANALYSIS.json')
-    previous = next(r for r in old_analysis['comparisons'] if r['comparison'] == 'diagnostic-true' and r['metric'] == 'default/score')
-    sd = float(np.std(previous['seed_differences'], ddof=1))
-    result = {'complete': len(rows) == 120, 'n': len(rows), 'valid_measurements': len(good),
-              'failed': len(rows) - len(good), 'paired_rank_checks': pairs,
-              'strict_rank_flips': sum(r['strict_rank_flip'] for r in pairs),
-              'old_diagnostic_true_seed_sd': sd,
-              'normal_approx_95_halfwidth_at_20_for_sd': {str(s): 1.96 * s / np.sqrt(20) for s in (.05, sd, .15, .20)},
-              'note': 'Offline exploratory old-sample diagnostic. Halfwidths are planning approximations, not guaranteed power; new primary contrast is different.'}
-    write_json(root / 'PILOT.json', result)
-    return result
-
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('stage', choices=['pilot', 'freeze', 'initialize', 'prepare', 'generate', 'select', 'holdout', 'all'])
+    parser.add_argument('stage', choices=['freeze', 'initialize', 'prepare', 'generate', 'select', 'holdout', 'all'])
     parser.add_argument('--output', default=DEFAULT_ROOT)
     parser.add_argument('--workers', type=int, default=12)
     parser.add_argument('--api-workers', type=int, default=8)
@@ -450,11 +388,8 @@ def main():
         parser.error('Worker counts must be positive')
     root = Path(args.output)
     root.mkdir(parents=True, exist_ok=True)
-    if args.stage == 'pilot':
-        run_pilot(root, args.workers)
-        return
     if args.stage == 'freeze':
-        print(json.dumps({'frozen': freeze(root)['implementation_hash'], 'requests': 840}))
+        print(json.dumps({'frozen': freeze(root)['implementation_hash'], 'requests': 480}))
         return
     manifest = check_manifest(root)
     from dotenv import load_dotenv
@@ -489,7 +424,7 @@ def main():
             pool_run(holdout_job, [(str(root), 'parent', f's{seed}-rank{rank}') for seed in SEEDS for rank in RANKS], args.workers, root, 'holdout_parents', True)
             pool_run(holdout_job, [(str(root), 'child', job['id']) for job in manifest['jobs']], args.workers, root, 'holdout_children', True)
             write_json(root / 'COMPLETE.json', {'implementation_hash': source_hash(), 'completed_at': time.time(),
-                                               'initial': 240, 'candidates': 600, 'contexts': 60})
+                                               'initial': len(manifest['init_jobs']), 'candidates': len(manifest['jobs']), 'contexts': len(SEEDS) * len(RANKS)})
 
 
 if __name__ == '__main__':

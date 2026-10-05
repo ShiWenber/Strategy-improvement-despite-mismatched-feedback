@@ -1,19 +1,4 @@
-"""Cross-model report tables: read frozen analyses, recompute the paired contrasts.
-
-Reads only the committed ``ANALYSIS.json`` files and prints the tables used by
-``docs/direct_reciprocity/CROSS_MODEL_REPLICATION.md``. Nothing is written to any
-results directory; the frozen artifacts are treated as read-only.
-
-- The raw ``tau`` contrast is reported from the frozen payload, and both its
-  per-population seed vector and its exact sign-swap p are recomputed as drift
-  checks; the script asserts the recomputation matches the frozen record.
-- ``tau_S3`` is *not* a frozen endpoint, so it is recomputed here from the frozen
-  per-population seed vectors with the project's population-cluster bootstrap.
-
-Usage (from the worktree root)::
-
-    python results/model_comparison_20260928/cross_model_summary.py
-"""
+"""Recompute four model/configuration mainline summaries and verify paired tests."""
 from __future__ import annotations
 
 import json
@@ -22,10 +7,6 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
-
-ARMS = ('score', 'accurate', 'mismatched')
-BOOTSTRAP_DRAWS = 20000
-BOOTSTRAP_SEED = 2026093004
 
 # Where the frozen raw contrast lives. The Qwen top-level file holds only the
 # focus contrasts, while the per-mode files hold the full per-arm results.
@@ -74,20 +55,6 @@ def raw_seed_values(result):
             - np.asarray(result['raw']['mismatched']['metrics']['default/score']['seed_values'], dtype=float))
 
 
-def s3_seed_values(result):
-    return (np.asarray(result['selected']['S3/accurate']['metrics']['default']['seed_values'], dtype=float)
-            - np.asarray(result['selected']['S3/mismatched']['metrics']['default']['seed_values'], dtype=float))
-
-
-def cluster_bootstrap(values, draws=BOOTSTRAP_DRAWS, seed=BOOTSTRAP_SEED):
-    """Percentile interval over the 20 population means."""
-    values = np.asarray(values, dtype=float)
-    n = len(values)
-    rng = np.random.default_rng(seed)
-    boot = values[rng.integers(0, n, size=(draws, n))].mean(axis=1)
-    return float(values.mean()), float(np.quantile(boot, .025)), float(np.quantile(boot, .975))
-
-
 def sign_swap(values):
     """Exact paired sign-swap p over the 20 population means."""
     values = np.asarray(values, dtype=float)
@@ -100,50 +67,26 @@ def sign_swap(values):
 
 
 def main():
-    results = {}
-    for key in FROZEN_TAU:
-        model, mode = key
-        results[key] = result_block(model, mode, read(RESULT_FILES[key]))
-
-    print('## 原始候选（未经筛选）—— tau 取自冻结记录\n')
-    print('| 模型 | 模式 | raw Score | raw Accurate | raw Mismatched | tau = A-M | tau CI95 | 符号交换 p |')
-    print('|---|---|---:|---:|---:|---:|---|---:|')
-    for key in FROZEN_TAU:
-        model, mode = key
-        result = results[key]
-        node = frozen_raw_contrast(model, mode)
-        means = {arm: result['raw'][arm]['metrics']['default/score']['mean'] for arm in ARMS}
-        tau = raw_seed_values(result)
-        assert abs(tau.mean() - node['mean']) < 1e-9, \
-            '{}/{}: recomputed tau {} != frozen {}'.format(model, mode, tau.mean(), node['mean'])
-        p = sign_swap(tau)
-        assert abs(p - node['sign_swap_p']) < 1e-6, \
-            '{}/{}: recomputed p {} != frozen {}'.format(model, mode, p, node['sign_swap_p'])
-        print('| {} | {} | {:+.5f} | {:+.5f} | {:+.5f} | {:+.6f} | [{:+.6f}, {:+.6f}] | {:.4f} |'.format(
-            model, mode, means['score'], means['accurate'], means['mismatched'],
-            node['mean'], node['ci95'][0], node['ci95'][1], p))
-
-    print('\n## S3 验证选择后（tau_S3 由本脚本计算，非冻结端点）\n')
-    print('| 模型 | 模式 | S3 Score | S3 Accurate | S3 Mismatched | tau_S3 | tau_S3 CI95 |')
-    print('|---|---|---:|---:|---:|---:|---|')
-    for key in FROZEN_TAU:
-        model, mode = key
-        result = results[key]
-        means = {arm: result['selected']['S3/' + arm]['metrics']['default']['mean'] for arm in ARMS}
-        mean, lo, hi = cluster_bootstrap(s3_seed_values(result))
-        print('| {} | {} | {:+.5f} | {:+.5f} | {:+.5f} | {:+.6f} | [{:+.6f}, {:+.6f}] |'.format(
-            model, mode, means['score'], means['accurate'], means['mismatched'], mean, lo, hi))
-
-    print('\n## |tau| 的置信上限 vs S3 选择增益\n')
-    print('| 模型 | 模式 | |tau| 上限 | S3/score | 上限占选择增益 |')
-    print('|---|---|---:|---:|---:|')
-    for key in FROZEN_TAU:
-        model, mode = key
-        node = frozen_raw_contrast(model, mode)
-        upper = max(abs(node['ci95'][0]), abs(node['ci95'][1]))
-        selection = results[key]['selected']['S3/score']['metrics']['default']['mean']
-        print('| {} | {} | {:.4f} | {:+.5f} | {:.0f}% |'.format(
-            model, mode, upper, selection, 100 * upper / selection))
+    statistics, sources = {}, {}
+    for (model, mode), relative in RESULT_FILES.items():
+        result = result_block(model, mode, read(relative))
+        contrast = frozen_raw_contrast(model, mode)
+        values = raw_seed_values(result)
+        assert np.allclose(values, contrast['seed_values'], atol=1e-12, rtol=0)
+        assert abs(sign_swap(values) - contrast['sign_swap_p']) < 1e-12
+        key = model + '/' + mode.upper()
+        statistics[key] = {
+            'raw_mismatched': result['raw']['mismatched']['metrics']['default/score'],
+            's3_mismatched': result['selected']['S3/mismatched']['metrics']['default'],
+            'raw_accurate_minus_mismatched': {k: contrast[k] for k in ['n_seeds', 'seed_values', 'mean', 'ci95', 'sign_swap_p']}}
+        sources[key] = relative
+    report = {'sources': sources, 'statistics': statistics,
+              'unit': '20 shared independent populations; 3 parents per population',
+              'interval': 'Unadjusted population bootstrap intervals',
+              'note': 'Two report conditions only. S3 uses V; H was previously used in follow-ups.'}
+    destination = ROOT / 'results/model_comparison_20260928/cross_model_mainline_data.json'
+    destination.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+    print('Recomputed four model/configuration mainline summaries')
 
 
 if __name__ == '__main__':

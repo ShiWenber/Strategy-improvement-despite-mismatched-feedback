@@ -80,7 +80,7 @@ def prepare(root):
                     protocol_hash=filehash(PROTOCOL), reused_file_hashes=copied,
                     jobs=old['jobs'], seeds=old['seeds'], arms=old['arms'],
                     ranks=old['ranks'], draws=old['draws'], config=old['config'],
-                    frozen_at=time.time(), new_calls=600, reused_initial_calls=240,
+                    frozen_at=time.time(), new_calls=len(old['jobs']), reused_initial_calls=240,
                     api={k:v for k,v in specification('').items() if k != 'prompt'},
                     historical_budget=6000, comparison='historical paired configuration comparison')
     prompts = {}
@@ -339,7 +339,7 @@ def main():
             verify(root)
             release_parents(root, m)
             pool(holdout_job, [(str(root),'child',j['id']) for j in m['jobs']], a.workers, root, 'holdout', True)
-            write_json(root / 'COMPLETE.json', {'completed_at':time.time(), 'candidates':600,
+            write_json(root / 'COMPLETE.json', {'completed_at':time.time(), 'candidates':len(m['jobs']),
                        'contexts':60, 'new_initial_calls':0, 'implementation_hash':source_hash()})
     finally:
         lock.close()

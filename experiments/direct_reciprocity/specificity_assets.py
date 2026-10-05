@@ -9,7 +9,7 @@ from statistics import mean
 from .baselines import policy
 from .core import Config, RandomView, act, seed_for
 
-ARMS = ('score', 'accurate', 'mismatched', 'background', 'cooperation')
+ARMS = ('accurate', 'mismatched')
 FAMILIES = ('recovery', 'exploitation', 'random', 'memory')
 SEEDS = tuple(range(200, 220))
 RANKS = (1, 3, 6)
@@ -138,51 +138,6 @@ def diagnostic_block(diagnostics):
     for name, result in diagnostics.items():
         lines.append(name + ': ' + '; '.join(f'{key}={value:.4f}' for key, value in sorted(result['mean'].items())))
     return head + '\n'.join(lines)
-
-
-BACKGROUND = (
-    'BACKGROUND INFORMATION. These statements describe the game and interface, not measurements of this parent. ',
-    'Each policy outputs one of two action symbols at each decision. ',
-    'The history contains executed action pairs from the current bilateral match. ',
-    'The first coordinate belongs to this player and the second to its opponent. ',
-    'A new match begins with an empty history and resets the action sequence. ',
-    'The function receives history and a reproducible random generator as arguments. ',
-    'The payoff table specifies the reward associated with each pair of actions. ',
-    'A cumulative score adds the rewards obtained over a fixed number of rounds. ',
-    'The tournament combines a peer component and an archive component. ',
-    'Population source entries are displayed in slot order, with a score for each slot. ',
-    'Source code must obey the stated Python interface and return a valid action. ',
-    'The external evaluator executes the returned function on successive histories. ',
-)
-COOPERATION = (
-    'GENERAL COOPERATION ADVICE. This is general guidance, not a measurement or diagnosis of this parent. ',
-    'Consider beginning cooperatively to make mutual cooperation possible. ',
-    'Give a partner opportunities to return to a mutually cooperative interaction. ',
-    'Avoid allowing an isolated defection to cause permanent mutual retaliation. ',
-    'Consider forgiveness after a temporary disruption in otherwise cooperative play. ',
-    'Preserve established mutual cooperation when the partner continues cooperating. ',
-    'A conciliatory action can sometimes help end a chain of alternating retaliation. ',
-    'Prefer repairs that support recovering mutual cooperation after a short conflict. ',
-    'A short punishment followed by renewed cooperation may restore coordination. ',
-    'Consider the cumulative value of a long sequence of mutually cooperative rounds. ',
-    'An occasional mistaken action need not erase the possibility of future cooperation. ',
-    'Use these general suggestions while pursuing the stated tournament objective. ',
-)
-
-
-def length_matched_text(sentences, target):
-    enc = tokenizer()
-    result = sentences[0]
-    i = 1
-    while len(enc.encode(result)) < .97 * target:
-        sentence = sentences[1 + (i - 1) % (len(sentences) - 1)]
-        if len(enc.encode(result + sentence)) > 1.05 * target:
-            break
-        result += sentence
-        i += 1
-    if not .95 * target <= len(enc.encode(result)) <= 1.05 * target:
-        raise ValueError('Cannot match text length within frozen tolerance')
-    return result
 
 
 def assets_record():

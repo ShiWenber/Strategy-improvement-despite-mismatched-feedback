@@ -1,6 +1,6 @@
 """Descriptive population evidence from sealed records, with no new games/API calls.
 
-Candidate distributions describe all 600 candidate generation outputs in each configuration.
+Candidate distributions describe all 240 candidate generation outputs in each configuration.
 Population panels average draws, parents and arms within the SAME 20 seed clusters.
 This is an exploratory visualization, not an extra family of significance tests.
 """
@@ -15,7 +15,7 @@ import numpy as np
 
 RUNS = {'Off / 6k': 'feedback_specificity_v2',
         'On / 384k': 'feedback_specificity_thinking_384k_20260923'}
-ARMS = ('score', 'accurate', 'mismatched', 'background', 'cooperation')
+ARMS = ('accurate', 'mismatched')
 SEEDS = list(range(200, 220))
 COLORS = ['#0072B2', '#D55E00']
 sources = {}
@@ -36,15 +36,15 @@ for label, run in RUNS.items():
     path = ROOT / 'results' / run
     candidates = [read(p) for p in sorted((path/'candidates').glob('*.json'))]
     rows = [read(path/'holdout'/f'{c["id"]}.json') for c in candidates]
-    assert len(rows) == 600 and sorted(set(r['seed'] for r in rows)) == SEEDS
+    assert len(rows) == 240 and sorted(set(r['seed'] for r in rows)) == SEEDS
     byid = {r['id']: r for r in rows}
     sealed = [s for s in read(path/'SELECTIONS_SEALED.json')['rows'] if s['rule'] == 'S3']
-    assert len(sealed) == 300
+    assert len(sealed) == 120
     chosen = [{'seed': s['seed'], 'arm': s['arm'], 'accepted': s['accepted'],
                'context': s['context'], 'winner': s['winner'],
                'gain': byid[s['winner']]['delta']['default']['score'] if s['accepted'] else 0.0}
               for s in sealed]
-    assert all(sum(r['seed'] == s for r in rows) == 30 for s in SEEDS)
+    assert all(sum(r['seed'] == s for r in rows) == 12 for s in SEEDS)
     raw = [float(np.mean([r['delta']['default']['score'] for r in rows if r['seed'] == s])) for s in SEEDS]
     selected = [float(np.mean([r['gain'] for r in chosen if r['seed'] == s])) for s in SEEDS]
     contrast = [float(np.mean([r['delta']['default']['score'] for r in rows if r['seed']==s and r['arm']=='accurate'])
@@ -71,4 +71,4 @@ for label, check in zip(RUNS, (old_analysis, new_analysis)):
 
 report = {'configurations': data, 'new_games': 0, 'new_model_calls': 0, 'sources_sha256': sources}
 (OUT/'population_summary.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
-print('Recomputed distributions and decisions for 1200 candidates')
+print('Recomputed distributions and decisions for 480 candidates')

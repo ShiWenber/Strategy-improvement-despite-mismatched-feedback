@@ -1,258 +1,180 @@
-# Direct reciprocity：论文实验与图表复现
+# Strategy improvement despite mismatched feedback
 
-本项目对应论文 **Strategy improvement despite mismatched feedback: evolving direct reciprocity with large language models**。它在重复囚徒困境中固定父代，分别测量报告匹配、候选生成和外部选择的作用。本 README 汇总正文、补充材料及原实验记录中的数据来源、实现细节、脚本依赖和运行方法。图号以当前英文稿实际编译引用为准：正文 Figure 1–3，补充 Figure S1–S6；中英文稿共用英文图件。旧文件名 `figure3.pdf` 实际对应补充 Figure S1，不能据文件名判断正文编号。
+本项目对应论文 *Strategy improvement despite mismatched feedback: evolving direct reciprocity with large language models*。唯一远程仓库为 [ShiWenber/Strategy-improvement-despite-mismatched-feedback](https://github.com/ShiWenber/Strategy-improvement-despite-mismatched-feedback)。
 
-**直接复现：** 在项目根目录运行 `python tools/reproduce.py`。原始数据在 [results](results/)，复现中间结果另存 `_reproduct` 文件；[reproduct](reproduct/) 仅保存新数据和图像。默认流程离线，不需要 API key，不重新生成候选。正文数值图输出为 `fig2.png`、`fig3.png`，补充图为 `figS1.png`–`figS6.png`；数值图同时输出 PDF/SVG。Figure 1 是方法示意图，直接使用 `paper_zh_direct/figures/figure1.{png,pdf}` 和 `figure1_editable.pptx`，无需复制到 `reproduct`。
+研究主线是 **Accurate 与 Mismatched**：在相同父代、种群源码、规则和真实训练成绩下，分别提供父代自身或同群另一策略的数值行为报告；区分未经选择的候选质量与外部选择后的输出质量。
 
-## 1. 安装与一键运行
+## 快速复现
 
-```bash
+在项目根目录执行，推荐 Python 3.12。以下流程读取归档响应，不调用 LLM API。
+
+```powershell
 git clone https://github.com/ShiWenber/Strategy-improvement-despite-mismatched-feedback.git
 cd Strategy-improvement-despite-mismatched-feedback
+python -m venv .venv
+.venv/Scripts/python -m pip install -r requirements-reproduction.txt
+.venv/Scripts/python tools/reproduce.py
 ```
 
-完整项目要求 Python ≥3.12；本次验证环境为 Python 3.12.7。完整依赖与解析结果分别见 [pyproject.toml](pyproject.toml) 和 [uv.lock](uv.lock)。安装依赖后即可复现：
+Linux/macOS 将解释器路径改为 `.venv/bin/python`。也可使用 `uv sync --frozen` 和 `uv run python tools/reproduce.py`。
+
+完整流程依次核验输入哈希、重算统计、导出数据、生成图表并抽样重放对局。最终查看 `results/reproduction/verification_reproduct.json`：`status` 应为 `passed`，所有统计比较通过，重放误差不超过 `1e-12`。子进程禁止网络连接，防止离线复现意外产生 API 费用。
 
 ```powershell
-# Windows PowerShell，从项目根目录运行
-python -m venv .venv-reproduct
-.venv-reproduct/Scripts/python.exe -m pip install -r requirements-reproduction.txt
-.venv-reproduct/Scripts/python.exe tools/reproduce.py
+.venv/Scripts/python tools/reproduce.py --stage prepare
+.venv/Scripts/python tools/reproduce.py --stage statistics
+.venv/Scripts/python tools/reproduce.py --stage figures
+.venv/Scripts/python tools/reproduce.py --stage replay
 ```
 
-```bash
-# Linux / macOS，从项目根目录运行
-python3 -m venv .venv-reproduct
-.venv-reproduct/bin/python -m pip install -r requirements-reproduction.txt
-.venv-reproduct/bin/python tools/reproduce.py
-```
+分阶段复现时先运行 `statistics` 再运行 `figures`；它们按依赖顺序读取 `_reproduct` 中间结果。
 
-已有项目环境可直接运行：
+## 数据范围与来源
 
-```powershell
-.venv/Scripts/python.exe tools/reproduce.py
-```
+当前发布只保留两种报告条件的原始记录。它们来自既有实验的主线子集，不是重新采集或重新随机化的两条件实验。保留记录的 ID、原始请求位置、提示词、响应、时间戳、候选源码和选择决定不变；ID 中的 `pos` 仍代表原始提交位置，不要求连续。
 
-分阶段运行适合检查中间结果：
+每个模型与配置有 20 个共享种群、60 个父代、每父代每条件两次生成，因此保留 **240 个候选、120 个双候选池、360 项 S1/S2/S3 选择决定**。四格共 960 个候选响应，共享 DeepSeek OFF 的 240 个初始化响应；模型或配置数量不增加独立种群数。
 
-```powershell
-python tools/reproduce.py --stage prepare     # 校验全部论文原始输入
-python tools/reproduce.py --stage statistics  # 从记录重算统计及敏感性分析
-python tools/reproduce.py --stage figures     # 重绘正文及补充图、导出表格
-python tools/reproduce.py --stage replay      # 真实执行样本策略与 H 对手对局
-python tools/reproduce.py --stage export      # 导出候选、种群和条件统计 CSV
-```
+| 模型/配置 | 数据目录 | 有效候选 / 240 | 请求设置 |
+|---|---|---:|---|
+| DeepSeek OFF | `results/feedback_specificity_v2/` | 232 | `deepseek-flash`，temperature=1，thinking disabled，max_tokens=6000 |
+| DeepSeek ON | `results/feedback_specificity_thinking_384k_20260923/` | 237 | 同一 API 模型标识，thinking enabled，reasoning_effort=high，max_tokens=384000 |
+| Qwen OFF | `results/qwen3_8/off/` | 224 | `qwen3.8-flash`，temperature=1，enable_thinking=false，max_tokens=6000 |
+| Qwen ON | `results/qwen3_8/on/` | 221 | 同一模型，enable_thinking=true，reasoning_effort=high，max_tokens=131072 |
 
-每步失败会停止，详情见 `results/reproduction/*_reproduct.log`。每个阶段都先校验原始输入。复现器使用项目本身的源码，不解包、不创建工作副本，输出与论文原文件分开。
+论文中的 DeepSeek 名称为 deepseek-v4.1-flash；归档请求使用当时的 API 标识 `deepseek-flash`。服务端别名和后续模型版本不保证权重固定。ON/OFF 同时改变思考与输出预算，且属于不同时间的采集，不能把配置差单独归因于思考开关。Qwen 是复用同一父代与已使用测试面板的后续模型检验。
 
-| 依赖 | 用途 | 是否为离线复现必需 |
-|---|---|---|
-| NumPy、SciPy | 种群聚合、bootstrap、统计与距离计算 | 是 |
-| Matplotlib | 图像、PDF/SVG 导出和字号/边界检查 | 是 |
-| pandas | 表格与历史框架导入依赖 | 是 |
-| OpenAI SDK、python-dotenv | 历史运行模块的导入依赖；在线生成时用于调用和配置 | 是，但离线不调用 API |
-| tiktoken、`cl100k_base` | 提示附加块长度匹配 | 新生成/重新构建提示需要；缓存重绘无需重新分词 |
-| TypeSafe / Jev | 可见推理的原始标签判读 | 读取冻结判读缓存不需要；重新判读需要服务与依赖 |
-| TeX 与稿件字体 | 编译原多文件论文 | 数据和图像复现不需要 |
+`manifest.json` 中的 `archive_projection` 记录主线筛选及原始容器的 SHA256；原 implementation/runner 哈希保留为历史来源。条件容器经过筛选，当前容器哈希不冒充最初封存哈希。`PROMPTS_SEALED.json`、`SELECTIONS_SEALED.json` 与 `H_RELEASED.json` 记录当前保留集及原封存文件来源；候选哈希和保留的选择决定未改。原归档不能被新版生成程序续写；新的 API 实验应使用新目录。
 
-最小环境的版本在 [requirements-reproduction.txt](requirements-reproduction.txt) 固定。本机运行版本和各步骤耗时由 `results/reproduction/verification_reproduct.json` 记录。本项目已去掉与当前论文无关的 GPU 嵌入和旧框架依赖。
+### 每种记录表示什么
 
-## 2. 单一项目结构与原始记录
-
-本项目只关联 [Strategy-improvement-despite-mismatched-feedback](https://github.com/ShiWenber/Strategy-improvement-despite-mismatched-feedback) 仓库。源码直接位于 `experiments/`、`tools/` 和 `paper_zh_direct/tools/`；论文原始记录直接位于根目录的 `results/`，保留原来的目录和文件名。无需另行下载数据压缩包，也无需复制源码或建立第二个工作树。
-
-| 位置 | 内容 |
+| 文件/目录 | 内容与用途 |
 |---|---|
-| `experiments/direct_reciprocity/` | 当前研究的模拟器、反馈、生成、选择、统计代码 |
-| `tools/reproduce.py` | 根目录的一键复现入口 |
-| `tools/reproduce_worker.py` | 单步离线运行，写入独立复现文件，禁止网络调用 |
-| `results/<原实验名>/` | 原始请求、代码、评分、封存选择、H/F′测量与原分析文件 |
-| `results/figure_rendering/` | S2 原始直方图/密度显示坐标及绘图输入，原文件名不变 |
-| `results/reproduction/INPUT_MANIFEST.json` | 每个论文输入的相对路径、字节数和 SHA-256 |
-| `results/reproduction/` | 本次检查报告、日志与精简表格；文件名带 `_reproduct` |
-| `paper_interface_focus/`、`paper_zh_direct/` | 英文正文/补充材料和中文稿；共用中文稿目录中的一套原图 |
-| `reproduct/` | **只有一层**新算出的 CSV/JSON 数据和 `fig2`、`fig3`、`figS1`–`figS6` 图像；没有源码、原始数据副本或子目录 |
+| `manifest.json` | 种群种子、父代名次、保留条件、候选任务、请求配置与来源 |
+| `requests_initial/`、`initial/` | 240 个初始化请求/响应及验证后的策略，仅 OFF 保存 |
+| `populations/s200.json` … `s219.json` | 每群 12 个策略、初始训练成绩、反馈测量、无固定点供体置换 |
+| `contexts/s200-rank1.json` 等 | 60 个共享父代、供体、两种完整提示与长度计数 |
+| `requests_candidates/<id>.json` | 原始 API 参数、响应、用量、有效性；ON 另含可见推理 |
+| `candidates/<id>.json` | 原始候选程序及验证结果 |
+| `selection_scores/<id>.json` | 父代/候选 S1、S2、S3 的选择成绩，独立于测试结果 |
+| `SELECTIONS_SEALED.json` | 360 项封存选择决定，候选或父代保留 |
+| `holdout/<id>.json` | 原始收益与独立行为测量；失败回退及相对父代增量 |
+| `ANALYSIS.json`、`AUDIT.json` | 当前两条件聚合统计与记录审计；论文数据文件名保持不变 |
 
-旧框架和额外的源码快照不参与复现，也不提供兼容层。历史 manifest 中的实现哈希保留为原实验记录字段，不要求精简后的代码继续使用旧哈希。分析会重新核对提示、响应、候选代码、选择封存和收益算术；一键入口还核对全部原始输入哈希。
+ON 与 Qwen 目录已有共享父代的配套记录，它们不是新增初始化或独立父代。每次复现都使用现有记录，不额外复制数据或源码。
 
-新增中间结果按 `原文件名去掉扩展名 + _reproduct + 扩展名` 保存，例如 `results/feedback_specificity_v2/ANALYSIS_reproduct.json`、`role_analysis/ANALYSIS_reproduct.json` 和 `docs/direct_reciprocity/mismatch_distance/mismatch_distance_thinking_off_reproduct.json`。原 `ANALYSIS.json` 及封存记录不被覆盖。后续绘图优先读取本次重算文件；尚未重算的部分读取原文件，因此单独重绘图像不代表统计复核已完成。
+## 实验实现与统计口径
 
-## 3. 每个论文实验的数据归属
+核心执行器在 `experiments/direct_reciprocity/core.py`，基准策略在 `baselines.py`，提示构造在 `prompts.py`；两条件流程在 `specificity.py`，供体置换在 `report_assignment.py`，报告与面板定义在 `specificity_assets.py`。
 
-以下路径均相对项目根目录。表中列出分析脚本的原入口；安全生成 `_reproduct` 中间结果时使用 `python tools/reproduce.py --stage statistics`。直接调用原分析脚本会写入它的默认结果路径。
+- 策略接口为 `strategy(history, rng)`，每轮返回 C/D。收益 CC/CD/DC/DD=3/0/5/1；默认每局100轮；训练按11个同群对手与13个固定基准分别赋权0.6/0.4。
+- 种群种子为200–219，每群12个策略，按训练成绩取第1、3、6名作为父代。报告供体来自同群12个成员的无固定点置换，不根据行为距离挑选。
+- 反馈探针 F 先给10轮CC，再测24轮，重复10次。包含短暂背叛后TFT/ALLC、持续背叛和周期背叛，报告36个统计特征。两条件报告均为504个 `cl100k_base` 代理tokens；OFF 的120对请求服务端输入token数逐对相等，两条件各1,052,774。
+- S1与S2分别以训练对手重复5/20次评分，S1使用S2前5次。S3用验证面板V：4类×6个对手，各重复20次。只选最高分有效候选且须严格超过父代；与父代同分则保留父代，候选并列优先draw0。
+- 收益面板H有4类×3个对手，各重复20次；默认100轮、噪声0.01及200轮长局分别记录。H不进入提示、候选资格或排名。V/H同属恢复互惠、剥削、随机和记忆一阶家族，参数不同。
+- 行为探针F′独立于收益和选择：40轮、20次重复，分别从7轮预置CC或空历史开始。持续背叛下末5轮单方面合作衡量暴露；恢复时间为背叛结束后完成连续5轮CC所需轮数，未恢复按剩余窗口封顶，并保留未恢复标记。
+- 无效生成不补抽。候选/设置执行失败时部署父代，增量为零；保留失败记录，不仅统计成功候选。OFF有8个无效候选，200轮设置另有1个有效候选执行失败。
 
-| 实验/分析 | 冻结数据 | 复现入口 | 复现产物 |
-|---|---|---|---|
-| DeepSeek OFF 主实验 | `results/feedback_specificity_v2/` | `python -m experiments.direct_reciprocity.specificity_analysis` | `ANALYSIS.json`、主比较/6项次比较、逐条件 Raw 与 S1/S2/S3 |
-| 同池采用政策，OFF 事后分析 | 上述 `holdout/`、`selection_scores/`、`SELECTIONS_SEALED.json` | `python -m experiments.direct_reciprocity.role_analysis` | `role_analysis/ANALYSIS.json`，R/G/U/B 的精确期望和差分 |
-| DeepSeek ON 后续配置 | `results/feedback_specificity_thinking_384k_20260923/` 与 OFF 父代 | `python thinking_control_analysis.py` | 新候选统计、历史配对配置比较、两项 focus 检验 |
-| Qwen OFF/ON 后续模型检查 | `results/qwen3_8/{off,on}/` | `python results/qwen3_8/analyze.py` | 每配置 `ANALYSIS.json` 与 Qwen 汇总 |
-| 跨模型核对 | 上述四配置及 `model_comparison_20260928/cross_model_mainline_data.json` | `python results/model_comparison_20260928/cross_model_summary.py` | 逐种群匹配差及精确符号交换核对日志 |
-| 候选分布及采用去向 | 两份 DeepSeek 原始候选、H 与 S3 封存选择 | `python tools/analyze_population.py` | `population_summary_reproduct.json`，1200候选增益、质量计数、种群向量及采用计数 |
-| H 分对手家族收益，DeepSeek OFF/ON | 两配置 `holdout/` 与封存选择 | `python paper_zh_direct/tools/analyze_opponent_profiles.py` | `figure4_opponent_profiles_20260926/ANALYSIS.json` |
-| 独立行为 F′、真实修改实例 | 两配置行为测量、父代/候选代码和 S3 决定 | `python paper_zh_direct/tools/plot_behavior_evidence.py` | `reciprocity_population_visuals_20260924/behavior/ANALYSIS.json`、示例 |
-| 报告错配距离与近供体剔除 | 240成员 F 报告、60父代/报告来源、Raw/S3 记录 | `python -m experiments.direct_reciprocity.mismatch_distance --root .` | `docs/direct_reciprocity/mismatch_distance/*.json` |
-| 可见推理归属/处理标签，仅 DeepSeek ON | `results/mismatch_detection_jev/{summaries,judgments}/`、`summary.json`、`validation.json` | 默认导出冻结判读；见第8节 | `reproduct/jev_recount.json`，原逐条标签在 results 中保留一份 |
-| 五种群探索性前导实验 | `results/feedback_attribution_v1/` | `python -m experiments.direct_reciprocity.feedback_analysis` | `results/feedback_attribution_v1/ANALYSIS_reproduct.json` |
+Raw先在同父代同条件内平均两次生成；S1/S2/S3每池使用选择或父代保留的一个输出。随后在种群内平均3个父代，对20个独立种群等权汇总。主线的条件平均只覆盖Accurate与Mismatched。
 
-原提示矩阵、多代框架试验、阳性对照和群体福利扩展是其他研究记录，未作为当前正文三图及上述补充统计的额外独立样本。相关代码入口仍在 `experiments/direct_reciprocity/`，研究协议见 `docs/direct_reciprocity/`；本项目的“所有论文实验”范围以上表与当前实际引用图表为准。
+原定确认性主比较是 DeepSeek OFF 的 Raw Accurate−Mismatched：均值 −0.000307986，95%区间[−0.010014106, +0.009500625]，双侧精确符号交换p=0.951618。检验枚举2^20个种群符号交换，依赖配对差的符号可交换性；区间用20,000次种群bootstrap，种子2026091903。区间跨零不证明等效。
 
-### 从原记录到结果的依赖顺序
+ON聚焦比较沿用原两项Holm族；Qwen沿用OFF、ON及ON−OFF的三项Holm族。选择输出、行为、固定池政策、距离关联均属探索性，区间未作多重校正。删除其他条件后，不把剩余探索性检验改称预定确认性检验。
 
-1. `requests_initial/` → `initial/` → `populations/`：240次初始化响应，验证代码并测量训练收益及 F 报告。
-2. `contexts/`：按训练排名选择每种群第1、3、6位父代，保存全部种群代码、真实成绩、五条件提示和报告来源。
-3. `requests_candidates/` → `candidates/`：每父代、每条件两次独立请求；最终程序和无效状态均保留。
-4. `selection_scores/` → `SELECTIONS_SEALED.json`：分别计算 S1/S2/S3 并固定900个决定。
-5. `H_RELEASED.json` → `holdout/`：选择固定后才做 H 收益和独立 F′ 行为测量；不让 H 参与选择。
-6. `ANALYSIS.json` / `role_analysis/ANALYSIS.json` → 论文表格和绘图缓存 → `fig2/fig3/figS*`。
+## 各实验如何复现
 
-OFF 的初始化和父代被后续三配置复用。每配置有600次候选生成、300个双候选池、900项选择决定；四配置合计2400个候选，加共享240次初始化是2640个最终生成响应。它们共享20个种群，不是80个独立种群。请求失败历史与最终候选数不是同一个计数。
+`tools/reproduce.py` 为统一入口；下表列出它运行的实际计算脚本。常规复现由 `tools/reproduce_worker.py` 将写入路由到同名 `_reproduct` 文件；不建议直接运行表中分析脚本覆盖论文使用的汇总。
 
-## 4. 正文和补充图逐张复现
-
-执行 `python tools/reproduce.py --stage figures` 即可重绘下表。绘图只使用冻结均值、区间、种群向量或原显示坐标；统计重算另在 `--stage statistics` 完成并核对。
-
-| 论文图号 → 输出 | 原资产名 | 数据/面板归属 | 绘图入口 |
-|---|---|---|---|
-| Figure 1 → 原 `figure1.png/pdf`、`figure1_editable.pptx` | `figure1` | 方法示意，不含需要统计重算的实验结果 | 直接引用唯一的原 PDF/PNG/PPTX；不重复存放 |
-| Figure 2 → `fig2.png/pdf/svg` | `if_results_matching` | a,b：`model_comparison_20260928/cross_model_mainline_data.json.statistics`；c：四配置五条件等权的20种群 Raw/S3向量 | `plot_results_three_figures.py` |
-| Figure 3 → `fig3.png/pdf/svg` | `if_payoff_behavior` | a,b：`figure4_opponent_profiles_20260926/ANALYSIS.json`，Accurate/Mismatched 的 H家族收益；c,d：行为 `ANALYSIS.json`，`controlled/pooled/{defection_exposure,recovery_rounds}` | 同上 |
-| Figure S1 → `figS1.*` | 旧 `figure3` | DeepSeek OFF/ON、五条件、S1/S2/S3 全结果 | `plot_camera_ready.py --figures 3` |
-| Figure S2 → `figS2.*` | `if_generation_selection` | `population_summary.json` 中600候选分布、20种群对、300池去向；直方图/KDE复用 `frozen_generation_display.json` 的原显示坐标 | `build_interface_figures.py` |
-| Figure S3 → `figS3.*` | 旧 `figure5` | OFF `role_analysis/ANALYSIS.json.summaries`，同池政策及分解 | `plot_camera_ready.py --figures 5` |
-| Figure S4 → `figS4.*` | `if_opponent_profiles` | 原始候选/S3、两配置、两报告条件、四H家族 | `plot_opponent_profiles.py` |
-| Figure S5 → `figS5.*` | 旧 `figure4` | OFF `ANALYSIS.json` 中独立行为变化，给定合作历史/空历史 | `plot_camera_ready.py --figures 4` |
-| Figure S6 → `figS6.*` | `if_mismatch_distance` | 两份冻结距离 JSON；60对距离相同，2640个同群异体有序对作参照 | `plot_mismatch_distance.py` |
-
-以上绘图脚本位于 `paper_zh_direct/tools/`，样式依赖 `results_plot_style.py`，补充图输出审计依赖 `results_plot_audit.py`。这些脚本随项目提交，只有一份源码。Figure 2/3 的读取键、种群顺序、输入哈希、最小字号和画布边界检查保存在 `results/reproduction/*_reproduct.json`。
-
-主图3上排只含Accurate/Mismatched，下排等权平均五条件；下排只用DeepSeek，不能声称已有Qwen行为复现。H 收益和 F′ 行为是不同测量。共享父代基线只绘一次，连线表示同父代比较，不是世代轨迹。Figure S2 的零增量回退属于分布的一部分；显示密度平滑该零点，不删除失败候选。
-
-## 5. 每张表和正文数值如何得到
-
-| 论文位置 | 来源和计算 | 文件/导出入口 |
+| 分析 | 计算脚本 | 原始输入 → 重算中间结果 |
 |---|---|---|
-| 正文 Table I：五信息条件 | Score无附加块；Accurate自身报告；Mismatched同群他人报告；Background/Cooperation长度对照 | `specificity_assets.py` 与 `contexts/*.json`，设计定义，不是估计值 |
-| 正文 Table II：三选择器 | S1训练5重复；S2训练20重复；S3验证20重复 | `specificity.py` 和 `selection_scores/*.json` |
-| 补充 Table S1：F′ 探针 | 两起始历史、五探针、40测量轮、20重复 | `specificity_assets.py:probe_specs`，参数定义 |
-| 补充 Table S2：OFF主/次比较 p | 主比较独立；6次比较一个Holm族 | `ANALYSIS.json.primary/secondary` → `tools/export_paper_tables.py` → `tableS2_primary_reproduct.tex/csv` |
-| 补充 Table S3：噪声/长对局 | OFF Accurate/Mismatched的Raw，逐设置重新以该父代为基线 | `ANALYSIS.json.raw` → 同脚本 → `tableS3_sensitivity_reproduct.tex/csv` |
-| 补充 Table S4：ON Accurate−Score | Raw和S3两个事后比较、两项Holm | `interface_focus_revision_20260925/ANALYSIS.json.thinking_on_accurate_minus_score_posthoc` → `tools/export_paper_tables.py`，再用种群向量重算核对 |
-| 补充 Table S5：S3随机采用差 | 默认/噪声/长对局的B−R | `role_analysis/ANALYSIS.json.summaries['pooled/S3/<setting>']` → `tableS5_selection_reproduct.tex/csv` |
-| 补充 Table S6：剔除近三分之一 | cutoff=5.643，保留40父代，按种群配对汇总 | `mismatch_distance_thinking_{off,on}.json` 中敏感性项；正文表为已冻结值 |
-| 四模型配置的有效数 | 最终响应/候选状态 | OFF/ON分别为DeepSeek 584/595、Qwen 572/528，600为各配置分母 |
-| 正文31/120、30/31、1/31 | 逐个Jev origin/handling标签与阈值 | `mismatch_detection_jev/judgments/`、`summary.json`，见第8节 |
-| 正文60/60数值不同及平均距离 | 240成员36特征标准化，60父代/报告来源对 | 两份 `mismatch_distance*.json`，不从图像估计 |
-| 真实策略修改实例 | 封存S3选择、H收益、F′指标和源代码；在事后类别内取最近类别中位数的候选 | 行为 `ANALYSIS.json.examples`，ID见下文 |
+| OFF主比较、两条件Raw/S1/S2/S3、敏感性 | `experiments.direct_reciprocity.specificity_analysis` | OFF请求、封存决定、H → `ANALYSIS_reproduct.json`、`AUDIT_reproduct.json` |
+| ON统计与历史配对配置差 | `thinking_control_analysis.py` | OFF/ON同父代H → ON的`ANALYSIS_reproduct.json` |
+| Qwen四格补充 | `results/qwen3_8/analyze.py` | Qwen请求及H → 各模式与总`ANALYSIS_reproduct.json` |
+| 固定池N/G/U/B选择政策 | `experiments.direct_reciprocity.role_analysis` | 同一候选池的选择成绩及H → `role_analysis/ANALYSIS_reproduct.json` |
+| 候选分布与选择去向 | `tools/analyze_population.py` | OFF/ON 480个候选H与S3决定 → `population_summary_reproduct.json` |
+| 分对手家族收益 | `paper_zh_direct/tools/analyze_opponent_profiles.py` | Accurate/Mismatched每个H对手收益 → `figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json` |
+| 独立行为阶段 | `paper_zh_direct/tools/plot_behavior_evidence.py` | 两条件F′及封存S3 → `behavior/ANALYSIS_reproduct.json` |
+| 错配距离与敏感性 | `experiments.direct_reciprocity.mismatch_distance` | 240个初始成员F报告、60个父代供体、两条件候选H → 原距离JSON同名加`_reproduct` |
+| 跨模型主线汇总 | `results/model_comparison_20260928/cross_model_summary.py` | 四格聚合及配对种群向量 → `cross_model_mainline_data_reproduct.json` |
+| 可见推理标签复核 | `tools/reproduce.py`中的缓存重计 | `results/mismatch_detection_jev/judgments/`240个既有标签 → `reproduct/jev_recount.json` |
 
-当前稿件仅需 S1–S6 六张补充数值表。`tools/export_paper_tables.py` 将 CSV/TeX 保存到 `results/reproduction/tables/`，文件带 `_reproduct` 后缀；S4还独立重算两项比较的区间与 Holm p 值。原稿中已不用的完整表格导出器已删除，不重复导出已归档表格。
+固定池政策N随机取已有候选，G随机取后执行父代门控，U在合格集合随机取，B在合格集合取最高分；使用两次可能抽取的精确期望，无新增模型调用。逐池重建封存决定，并核验B−N=(G−N)+(U−G)+(B−U)。政策分析bootstrap种子20260920，20,000次。
 
-当前稿件中三个真实修改示例为：OFF Cooperation `s217-rank3-d0-pos2`，ON Accurate `s210-rank3-d1-pos3`，ON Cooperation `s213-rank6-d0-pos1`。原代码位于对应 `contexts/<parent>.json` 和 `candidates/<id>.json`；H、F′、S3分数及实际赢家保存在同ID测量/评分记录。示例是事后说明，不代表独立验证或归属识别的因果证据。
+分对手收益对每家族3个对手等权平均，再对4家族等权平均，可逐种群还原总收益；探索性bootstrap种子2026092604。独立行为分析按同父代和封存选择连接Parent/Raw/S3，不解释为多代演化。
 
-主要导出数据：`candidate_gains.csv` 含2400候选×3种H设置；`population_gains.csv` 含四配置×五条件×Raw/S1/S2/S3×20种群；`condition_statistics.csv` 含80个默认设置条件均值和区间。这些 CSV 位于 `reproduct/`；完整重算分析保存在各原结果目录下的 `_reproduct.json`，不再复制一份到 `reproduct`。
+距离用F的36维特征在全部240个初始成员上标准化，计算父代与供体的欧氏距离。60个配对与同群不同成员的2,640个有序配对作参照；删除最近三分之一供体后，剩40父代的Raw匹配区间在OFF/ON仍跨零。距离与收益/行为关联为探索性，不构成中介证据。
 
-## 6. 正文实现细节集中说明
+可见推理检查仅覆盖DeepSeek ON两条件各120条轨迹。已有分块抽取与Jev标签保存在`summaries/`和`judgments/`。严格口径P(origin question)≥0.40且confidence≥0.60：Mismatched 31/120，Accurate 0/120；31条中30条继续使用、1条弃用。自动标签不等于真实识别率。常规复现仅重计缓存；重新抽取/判读需另行调用API。
 
-### 程序接口、随机数和失败规则
+## 图与表的对应关系
 
-策略实现 `strategy(history, rng)`，返回`C`或`D`。`history`是不可变行动对序列，自身行动在前；只提供本场历史和受控随机数。源码≤16000字符，每行动≤20000 line/opcode跟踪事件。每场重新实例化程序与历史，策略随机流和行动噪声流独立，并由比赛种子派生。
+`reproduct/`只有一层。生成的数值数据和图像存放于此，源码及正常位置的中间结果不复制进去。正文图用`fig2`、`fig3`；补充图用`figS1`–`figS6`，各提供PNG/PDF/SVG。
 
-初始化验证包括编译和对13训练参考策略的100轮对局，验证种子12345。初始化程序无效或F探针失败时部署ALLD并保留失败记录；240初始化中4例回退，均未入选父代。候选无效不补抽。父代评价失败停止分析；候选选择评分失败仅令其在相应选择器下不合格；某H设置运行失败仅在该设置回退父代，不改变封存选择。Raw均值包含无效/失败候选的零增量，不能仅平均有效程序。
+| 论文编号 | 复现产物 | 脚本与数据 |
+|---|---|---|
+| 图1 | 原方法示意图`paper_zh_direct/figures/figure1.pdf`及PNG | 非实验数值图，提供现成图源及可编辑PPTX；使用原PDF即可重建论文 |
+| 图2 | `reproduct/fig2.*` | `plot_results_three_figures.py`；四格主线匹配与两条件Raw/S3种群配对 |
+| 图3 | `reproduct/fig3.*` | 同脚本；家族收益与两条件独立行为 |
+| 图S1 | `reproduct/figS1.*` | `plot_camera_ready.py --figures 3`；两条件×三选择器×OFF/ON |
+| 图S2 | `reproduct/figS2.*` | `build_interface_figures.py`；每配置240个候选与120池；重新计算直方图与Scott带宽Gaussian KDE |
+| 图S3 | `reproduct/figS3.*` | `plot_camera_ready.py --figures 5`；两条件固定池政策及分解 |
+| 图S4 | `reproduct/figS4.*` | `plot_opponent_profiles.py`；两条件Raw/S3的四家族收益 |
+| 图S5 | `reproduct/figS5.*` | `plot_camera_ready.py --figures 4`；OFF两条件独立行为差 |
+| 图S6 | `reproduct/figS6.*` | `plot_mismatch_distance.py`；共享父代供体距离 |
+| 表S1 | `tableS1_probe_parameters_reproduct.csv/.tex` | F′固定探针参数 |
+| 表S2 | `tableS2_primary_reproduct.csv/.tex` | 原定Raw匹配主比较 |
+| 表S3 | `tableS3_sensitivity_reproduct.csv/.tex` | OFF两条件噪声与长局 |
+| 表S4 | `tableS4_selection_reproduct.csv/.tex` | 两条件S3−N噪声与长局 |
+| 表S5 | `tableS5_distance_reproduct.csv/.tex` | 排除最近供体后的匹配差 |
 
-### 游戏、训练、验证和测试
+中文稿的附录连续编号：图S1–S6对应中文图4–9，表S1–S5对应中文表III–VII。
 
-收益 `(R,S,T,P)=(3,0,5,1)`。默认100轮、无行动噪声。初始化训练分为对其他11个种群成员的平均累计收益×0.6，加对13个固定训练参考的平均累计收益×0.4，每对手5重复，排除自对局。参考为ALLC、ALLD、TFT、Grim、Pavlov、Random、Alternator、Bayesian、GTFT、Gradual、Prober、SuspiciousTFT、Extort2；以`baselines.py`实际源码为准。
+表格由`tools/export_paper_tables.py`生成，输出在`results/reproduction/tables/`。正文表1为两报告条件定义，表2为S1/S2/S3固定评分配置，不依赖API响应。
 
-S1/S2使用命名空间19001的新训练流；父代与候选共享对应流。S1每训练对手5重复，共120场，直接嵌套于S2的20重复、480场。S3对24个V对手各20重复，共480场，对手等权。S2与S3对局数相同，但分布和权重不同。
+当前两条件均值为：DeepSeek OFF Raw/S3=0.002475/0.025344，ON=0.068914/0.103851；Qwen OFF=0.020451/0.037118，ON=0.113492/0.157295。S3高于Raw的配对为79/80，其中DeepSeek OFF为19/20，其他三格各20/20。这80个配对共享20个种群，不能当作80个独立样本。
 
-V/H各含Recovery、Exploitation、Random、Memory-one四家族，分别每家族6/3成员。具体参数由`experiments/direct_reciprocity/specificity_assets.py:panel`保留；它逐项定义背叛起点/长度/宽恕率、剥削延迟/周期、随机合作概率和四状态memory-one概率。H每对手20重复，默认每策略240场，收益按每轮计。敏感性设置为100轮、独立行动翻转概率0.01，以及200轮、无噪声。历史记录实际执行动作。
+`reproduct/candidate_gains.csv`导出960候选×3测试设置=2,880行；`population_gains.csv`导出4配置×2条件×4阶段×20种群=640行；`condition_statistics.csv`导出32项均值与区间。
 
-### 报告F与独立行为F′
+## 重放、依赖与重新生成
 
-F先给10轮CC历史（不计入测量），随后24轮、10重复、5种探针。报告包含前4轮/后续/末5轮合作、末5轮相互与单方面合作、24轮收益；前三恢复探针还记录从背叛结束到连续5轮CC的时间和未恢复率。未恢复按剩余观察长度封顶；持续和周期背叛不设恢复时间字段。报告均值舍入4位小数，共36数值特征。
-
-F′使用7轮CC给定历史或空历史，再观察40轮、20重复。前三探针等权平均恢复；持续背叛末5轮单方面合作衡量暴露。恢复最短为5轮，未恢复仍封顶并保留失败标记。探针参数为`two_D_TFT`起点3/背叛2轮、`five_D_GTFT`起点9/5轮/宽恕0.15、`three_D_ALLC`起点6/3轮、`sustained_D`起点5/35轮、`periodic_D`起点4/每7轮前2轮背叛。F′不生成提示报告、不参与选择，也不计入H收益。
-
-### 条件输入、长度、顺序与选择平局
-
-种群种子200–219，每种群12成员，以真实训练排名固定1/3/6名父代。五条件共享父代、全部种群代码、游戏规则和真实训练成绩（6位小数），只改变附加文本。报告来源按同群12成员无固定点置换分配，不限于三个父代，不按行为距离挑选。
-
-每父代×条件两次调用的用户消息和参数逐字相同，不提供模型生成seed；draw编号只是记录两次随机采样。条件在种群内随机排序，父代/draw的五条件构成批次，批次再随机排列。每配置600候选、900选择决定先固定，随后开放H。候选需有效且选择分严格高于父代才采用；同分保留父代，候选间同分取第一次draw。
-
-长度仅匹配附加块，使用`cl100k_base`代理分词，非Score块需在Accurate长度±5%以内，Score不填充。60个上下文Accurate/Mismatched均504代理tokens，Background502，Cooperation494；120个父代/draw匹配对的OFF Accurate/Mismatched服务商输入token均相同，两条件分别共1,052,774输入tokens。代理长度不等于服务商计费或计算量。
-
-### 统计单位、政策期望和显示口径
-
-Raw先平均两个draw，再平均种群内三个父代，最后20种群等权。选择输出每池一个策略或父代。效应`Δ_H=J_H(child)−J_H(parent)`单位为每轮收益。五条件汇总仍在每条件自己的池内决策，再在种群内等权平均；不跨条件合并选优。
-
-两侧配对检验枚举`2^20`种群符号交换，依赖配对差的符号可交换假设；对父代零基线的检验还需对称性假设。95%区间使用20000次种群bootstrap，未做区间多重校正。OFF主比较Accurate−Mismatched独立，6次比较应用Holm；ON及Qwen保持各自原有后续检验族。区间跨零不证明等效。配置同时改变思考与输出上限，且服务端别名不能固定权重，不能将差异单独归因于思考开关。
-
-R（旧表有时写N）从两个候选均匀采用；G先均匀取一个，仅合格时采用；U从合格池均匀采用；B取合格池选择分最高者，空池保留父代。直接平均两种draw计算随机政策精确期望，不额外抽样。`B−R=(G−R)+(U−G)+(B−U)`是指定政策路径上的恒等分解，不能解释为一般因果贡献。R期望等于Raw，B输出等于对应S3时的S3，不增加独立样本。
-
-## 7. 在线重新生成：独立于原结果的重复实验
-
-默认离线流程足以复现已有统计和图表。重新调用模型属于新的随机重复，无法保证逐字输出或原论文均值；不应覆盖原实验候选与封存记录。以下命令仅说明完整新实验如何运行，默认复现器不会执行。
-
-使用本项目现有源码，选择新的输出目录并准备相应协议文件后，用`.env`或环境变量设置`DEEPSEEK_API_KEY`、`DEEPSEEK_API_BASE`；Qwen使用`QWEN_API_KEY`、`QWEN_API_BASE`。配置模块为`experiments/config/load_env.py`。当前`.env.example`的模型默认值不应替代论文manifest里的请求参数。
-
-| 配置 | 论文展示名 / 记录API model | temperature | thinking | 输出上限 |
-|---|---|---:|---|---:|
-| 初始化 / DeepSeek OFF | deepseek-v4.1-flash / `deepseek-flash` | 1 | disabled | 6000 |
-| DeepSeek ON | deepseek-v4.1-flash / `deepseek-flash` | 1 | enabled，reasoning_effort=high | 384000 |
-| Qwen OFF | qwen3.8-flash / `qwen3.8-flash` | 1 | enable_thinking=false | 6000 |
-| Qwen ON | qwen3.8-flash / `qwen3.8-flash` | 1 | enable_thinking=true，high | 131072 |
-
-原API标识不保证服务商当前仍提供同一版本。ON上限包含可见思考及程序输出，384K是上限，不是实际请求用量；只执行最终程序。
+默认重放每格按字典序取首个父代与两条件各首个候选，共12个对象；与有效性、收益方向无关。有效对象各重放240场默认H对局，检查平均收益、合作率和最差对手收益。无效程序单独记录、不执行。它使用本项目模拟器，并非独立实现，也不声称已重放全部对局。
 
 ```powershell
-# 使用当前项目源码和新的输出目录；费用取决于服务商
-python -m experiments.direct_reciprocity.specificity pilot --output results/new_off_reproduct --workers 4 --env-file .env
-python -m experiments.direct_reciprocity.specificity freeze --output results/new_off_reproduct --env-file .env
-python -m experiments.direct_reciprocity.specificity all --output results/new_off_reproduct --workers 4 --api-workers 2 --env-file .env
-
-# OFF完整后，复用其新父代和提示，开启ON
-python -m experiments.direct_reciprocity.thinking_control prepare --source results/new_off_reproduct --output results/new_on_reproduct --env-file .env
-python -m experiments.direct_reciprocity.thinking_control first --source results/new_off_reproduct --output results/new_on_reproduct --env-file .env
-python -m experiments.direct_reciprocity.thinking_control all --source results/new_off_reproduct --output results/new_on_reproduct --workers 4 --api-workers 2 --env-file .env
-
-# Qwen需要results/qwen3_8/PROTOCOL.md；依次运行off/on
-python -m experiments.direct_reciprocity.qwen38_control prepare --source results/new_off_reproduct --output results/qwen_new_reproduct/off --env-file .env
-python -m experiments.direct_reciprocity.qwen38_control first --source results/new_off_reproduct --output results/qwen_new_reproduct/off --env-file .env
-python -m experiments.direct_reciprocity.qwen38_control all --source results/new_off_reproduct --output results/qwen_new_reproduct/off --workers 4 --api-workers 2 --env-file .env
+.venv/Scripts/python tools/replay_worker.py --work . --output reproduct/replay.json --full
 ```
 
-为ON重复Qwen命令并将输出改为`results/qwen_new_reproduct/on`。阶段`first`完成后才允许`all`。API异常会停止；不自动重试可能已计费的请求。上述在线完整新实验未在本次离线整理中执行。完整新实验需要240初始化和每配置600候选请求，不属于“少量API验证”。需要小规模连通性检查时，仅在新目录运行对应`first`，仍不能据此宣称整项实验复现成功。
+`--full`重放每格所有父代/候选的默认H，可能耗时数小时；不会复查全部噪声、长局与F′记录。程序缺陷或重放差异会明确显示，不静默替换归档数据。
 
-## 8. JEV标签、距离敏感性和资源计数的边界
+依赖精确版本见`requirements-reproduction.txt`，项目定义与锁见`pyproject.toml`和`uv.lock`：NumPy用于数组/bootstrap，SciPy用于KDE，Matplotlib用于图，pandas用于统计辅助，OpenAI/httpx用于可选API，python-dotenv用于本地密钥，tiktoken用于报告长度。图像不是图像生成模型绘制。
 
-原归属判读只分析600条DeepSeek ON轨迹，每条件120条。`tools/judge_mismatch_detection_summary.py`用记录API `deepseek-flash`按40000字符、2000重叠提取逐字证据，再由记录模型`jev-1.13.0`分别判断origin和handling；不传条件标签。严格标准是质疑报告来源概率≥0.40且置信度≥0.60。31/120 Mismatched被标为质疑来源，对照Accurate0/120；31条中30继续使用、1弃用，全部Mismatched handling为119继续/1弃用。
-
-`s219-rank3-d1-pos4`是唯一弃用标签实例；原响应、提取和判读按该ID对应。部分人工核查17个正例及480条件对照给出TP17/FP5/TN475/FN0，其余103条Mismatched不具有独立人工真值。标签比例不等于真实识别率，不能由识别分组收益比较建立因果机制。复现读取逐条冻结判读，不重新上传轨迹。重新提取/判读会调用两种外部服务，另需安装TypeSafe；这些标签本身不能按确定性离线过程重新生成。
-
-距离将36个F特征在240成员上标准化后计算欧氏距离，OFF/ON共用60对。均距7.452，同群异体2640有序对均距7.487；低十分位参照不定义实质相似。剔除最近三分之一保留40父代，OFF/ON的匹配差分别约+0.00450 / +0.01027，区间仍跨零。敏感性按种群聚合，不能把40父代当40独立种群。
-
-原主流水线记录1,102,920场规范收益对局，另有反馈、行为探针、失败验证和重复计算。原六对象样本有一无效候选不重放，其他五对象共1200场。此次默认复现扩展到四配置的相同身份选择规则，实际对局数和误差见`reproduct/replay.json`；它使用当前项目模拟器，不是独立执行器验证，更不是对全部百万场的全量重放。
-
-## 9. 验证证据和范围
-
-已在干净 Git 克隆和新建最小依赖环境中完成全部流程：12,563 个原始输入哈希通过，26 组共 54,800 个数值与论文原结果逐值一致，样本重放 5520 场、最大误差 0；102 项测试通过、1 项跳过。英文正文、英文补充材料和中文稿均重新编译成功。完整证据见 [clean_clone_validation_reproduct.json](results/reproduction/clean_clone_validation_reproduct.json)。
-
-每次运行产生 [verification_reproduct.json](results/reproduction/verification_reproduct.json)，记录输入哈希检查、逐组数值比较、最大误差、执行命令和耗时。对局重放记录在 [replay.json](reproduct/replay.json)，图像来源清单在 [FIGURE_MANIFEST_reproduct.json](results/reproduction/FIGURE_MANIFEST_reproduct.json)。PDF/SVG 的时间或字体元数据可随环境变化，统计值与输入内容是主要核对对象。
-
-默认按身份抽样四配置各一个父代及每条件第一个候选，共24对象；无效候选记录为不执行对局。若要执行所有默认 H 记录：
+若需要重新采样，复制`.env.example`为`.env`并设置相应API密钥。本次发布验证使用0次API调用。LLM采样未设置生成种子，重新调用不能保证逐字或逐数值复现，且模型别名可能变化。
 
 ```powershell
-python tools/replay_worker.py --work . --output reproduct/full_replay.json --workers 4 --full
+.venv/Scripts/python -m experiments.direct_reciprocity.specificity freeze --output results/new_mainline_reproduct
+.venv/Scripts/python -m experiments.direct_reciprocity.specificity all --output results/new_mainline_reproduct --env-file .env
 ```
 
-全量模式可能需要数小时，仍不包含全部训练、噪声、长对局和 F′ 测量。离线复现不调用 LLM API，不重新生成原候选或 Jev 标签；其范围是从保存的原始响应、评分和测量记录重新算出论文统计、绘制数值图，以及实际执行样本 H 对局。模型重新生成属于另一次随机实验，少量调用不能证明整项论文实验已经重复成功。
+全批次重新采样需要240次初始化与240次候选调用，应在理解费用后运行；常规离线复现不需要它。后续ON/Qwen生成器支持`--source`指向新版完成的OFF目录，且必须用新输出目录。Jev可选重标脚本只用于来源/处理方式标签，不生成候选策略。
 
-相关测试可运行：
+## 编译论文与验证
+
+英文正文为`paper_interface_focus/main.tex`，英文附录为`supplement.tex`；中文为`paper_zh_direct/main.tex`。它们共享`paper_zh_direct/figures/`的正式图。复现输出保留在`reproduct/`，不覆盖正式图；发布时正式图已经同步为两条件版本。
+
+安装Tectonic或XeLaTeX后，在对应论文目录编译；中文需要SimSun/SimHei/KaiTi/FangSong，英文使用Times New Roman/Arial/Consolas。首次Tectonic编译可能下载TeX包，`--only-cached`只适用于缓存齐全时。
 
 ```powershell
-python -m pytest tests/test_specificity.py tests/test_specificity_pipeline.py tests/test_direct_reciprocity.py tests/test_direct_reciprocity_recovery.py tests/test_direct_reciprocity_control_prepare.py tests/test_direct_reciprocity_control_analysis.py tests/test_feedback_attribution.py tests/test_feedback_selection.py tests/test_feedback_analysis.py tests/test_import_health.py -q
+cd paper_interface_focus
+tectonic main.tex
+tectonic supplement.tex
+cd ../paper_zh_direct
+tectonic main.tex
 ```
 
-## 10. 稿件编译
+英文附录通过`xr`引用正文标签，先编译正文。没有作者单位或通信邮箱信息，TeX保留TODO占位；这些不影响实验复现。
 
-英文正文为 `paper_interface_focus/main.tex`，补充材料为 `supplement.tex`；中文稿为 `paper_zh_direct/main.tex`。两种语言共用 `paper_zh_direct/figures/` 中的一套原图。可在英文稿目录执行 `tools/build.ps1`，或使用支持 XeLaTeX 字体的 TeX/tectonic 环境。字体设置见各 `.tex` 导言区，中文稿另需中文字体。统计和图像复现不需要 TeX。
+```powershell
+.venv/Scripts/python -m pip install "pytest>=9.1.1"
+.venv/Scripts/python -m pytest tests
+```
+
+记录审计检验请求/源码/封存哈希、父代复用、回退算术和选择重建；完整复现将重新计算的种群向量、均值和区间与正式汇总逐项比较。输入清单`results/reproduction/INPUT_MANIFEST.json`在流程前后均核验。图形检查包括最小字号与文字边界。验证日志和报告同名加`_reproduct`保存于`results/reproduction/`。

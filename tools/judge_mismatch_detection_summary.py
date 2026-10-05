@@ -26,8 +26,6 @@ actually saw, plus the extraction. Otherwise the judgment leaks.
 Usage
 -----
     python tools/judge_mismatch_detection_summary.py prep
-    python tools/judge_mismatch_detection_summary.py pilot    # paired 34-file test
-    python tools/judge_mismatch_detection_summary.py validate
     python tools/judge_mismatch_detection_summary.py run --workers 16
     python tools/judge_mismatch_detection_summary.py report
 """
@@ -44,7 +42,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / '.research_deps'))
 sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv  # noqa: E402
@@ -53,7 +50,7 @@ load_dotenv(ROOT / '.env', override=False)
 
 RUN = ROOT / 'results' / 'feedback_specificity_thinking_384k_20260923'
 OUT = ROOT / 'results' / 'mismatch_detection_jev'
-ARMS = ('score', 'accurate', 'mismatched', 'background', 'cooperation')
+ARMS = ('accurate', 'mismatched')
 
 JEV_MODEL = 'jev-latest'
 SUMMARY_MODEL = os.environ.get('DEEPSEEK_MODEL', 'deepseek-flash')
@@ -69,7 +66,7 @@ RESOLUTION_LEVELS = ('kept_using', 'discarded', 'unclear')
 
 # Cuts on P(questions_its_origin). The paired pilot separates perfectly
 # anywhere in [0.10, 0.45], so 0.40 is safely inside that band. The confidence
-# gate at 0.60 drives the four control arms to zero false positives while
+# gate at 0.60 drives the Accurate control to zero false positives while
 # costing only two low-confidence mismatched detections.
 DEFAULT_THRESHOLD = 0.40
 DEFAULT_CONFIDENCE_GATE = 0.60
@@ -148,8 +145,6 @@ _BLOCK_CACHE: dict[tuple[str, str], str] = {}
 BLOCK_HEADERS = {
     'accurate': 'MEASURED PARENT BEHAVIOR.',
     'mismatched': 'MEASURED PARENT BEHAVIOR.',
-    'background': 'BACKGROUND INFORMATION.',
-    'cooperation': 'GENERAL COOPERATION ADVICE.',
 }
 BLOCK_END = '\nReturn only'
 
@@ -495,22 +490,6 @@ def cmd_run(args) -> None:
     run(jobs, args.workers, args.force)
 
 
-def cmd_pilot(args) -> None:
-    jobs = load_jobs()
-    positives = []
-    for job in jobs:
-        if job.arm != 'mismatched':
-            continue
-        trace = load_record(job.job_id).get('reasoning_content') or ''
-        if GOLD_PATTERN.search(trace):
-            positives.append(job)
-    pairs = [(p.context, p.draw) for p in positives]
-    negatives = [j for j in jobs if j.arm == 'accurate'
-                 and any(j.context == c and j.draw == d for c, d in pairs)]
-    sel = positives + negatives
-    print(f'pilot: {len(positives)} known positives + {len(negatives)} paired accurate negatives', flush=True)
-    run(sel, args.workers, args.force)
-
 
 def _confusion(rows: list[dict], threshold: float) -> dict:
     """Predict `questions_its_origin` when its probability clears `threshold`.
@@ -534,47 +513,6 @@ def _confusion(rows: list[dict], threshold: float) -> dict:
             'sensitivity': tp / (tp + fn) if tp + fn else None,
             'specificity': tn / (tn + fp) if tn + fp else None}
 
-
-def cmd_validate(args) -> None:
-    table = []
-    for row in load_judgments():
-        job = Job(row['job_id'], row['context'], row['arm'], row['draw'])
-        trace = load_record(job.job_id).get('reasoning_content') or ''
-        gold = gold_label(job, trace)
-        if gold is None or gold == 'unknown':
-            continue
-        table.append({'job_id': row['job_id'], 'arm': row['arm'], 'gold': gold,
-                      'origin_prob_questions': row.get('origin_prob_questions'),
-                      'origin_choice': row.get('origin_choice'),
-                      'origin_confidence': row.get('origin_confidence'),
-                      'resolution_choice': row.get('resolution_choice')})
-    if not table:
-        print('nothing judged yet')
-        return
-    npos = sum(r['gold'] == 'positive' for r in table)
-    print(f'gold-labelled files judged: {len(table)}  (positives {npos}, negatives {len(table) - npos})')
-
-    print(f'\n{"thr":>5} {"TP":>4} {"FP":>4} {"TN":>4} {"FN":>4} {"sens":>7} {"spec":>7}')
-    sweep = {}
-    for threshold in [round(0.05 * i, 2) for i in range(1, 20)]:
-        c = _confusion(table, threshold)
-        sweep[f'{threshold:.2f}'] = c
-        print(f'{threshold:>5.2f} {c["tp"]:>4} {c["fp"]:>4} {c["tn"]:>4} {c["fn"]:>4} '
-              f'{(c["sensitivity"] or 0):>7.3f} {(c["specificity"] or 0):>7.3f}')
-    primary = _confusion(table, args.threshold)
-    misses = [r for r in table if r['gold'] == 'positive'
-              and (r['origin_prob_questions'] or 0) < args.threshold]
-    noise = [r for r in table if r['gold'] == 'negative'
-             and (r['origin_prob_questions'] or 0) >= args.threshold]
-    print(f'\nthreshold {args.threshold}: {json.dumps(primary)}')
-    print('false negatives (' + str(len(misses)) + '): '
-          + ', '.join(f'{r["job_id"]}({r["origin_prob_questions"]:.2f})' for r in misses))
-    print('false positives (' + str(len(noise)) + '): '
-          + ', '.join(f'{r["job_id"]}/{r["arm"]}({r["origin_prob_questions"]:.2f})' for r in noise))
-    (OUT / 'validation.json').write_text(json.dumps(
-        {'threshold': args.threshold, 'primary': primary, 'sweep': sweep,
-         'false_negatives': misses, 'false_positives': noise}, indent=2, ensure_ascii=False),
-        encoding='utf-8')
 
 
 def cmd_report(args) -> None:
@@ -676,7 +614,7 @@ def cmd_report(args) -> None:
         '## 检出率',
         '',
         f'- `leaning`：P(origin) ≥ {thr}',
-        f'- `confident`：上述条件且 confidence ≥ {gate}（窄口径，四类对照误报为 0）',
+        f'- `confident`：上述条件且 confidence ≥ {gate}（窄口径，Accurate对照严格判读为0）',
         '',
         '| 条件 | leaning | 检出率 | confident | 检出率 |',
         '| --- | ---: | ---: | ---: | ---: |',
@@ -687,7 +625,7 @@ def cmd_report(args) -> None:
             continue
         lines.append(f'| {arm} | {row["leaning"]}/{row["files"]} | {row["leaning_rate"]:.3f} '
                      f'| {row["confident"]}/{row["files"]} | {row["confident_rate"]:.3f} |')
-    lines.append(f'| **四类非报告条件合并** | {pooled_leaning}/{len(pooled)} '
+    lines.append(f'| **Accurate报告条件** | {pooled_leaning}/{len(pooled)} '
                  f'| {pooled_leaning / len(pooled):.4f} | {pooled_confident}/{len(pooled)} '
                  f'| {pooled_confident / len(pooled):.4f} |')
 
@@ -721,19 +659,6 @@ def cmd_report(args) -> None:
                          f'resolution={match.get("resolution_choice")}')
         lines.append('')
 
-    validation = OUT / 'validation.json'
-    if validation.exists():
-        val = json.loads(validation.read_text(encoding='utf-8'))
-        p = val['primary']
-        sens = '—' if p['sensitivity'] is None else f'{p["sensitivity"]:.3f}'
-        spec = '—' if p['specificity'] is None else f'{p["specificity"]:.3f}'
-        lines += ['## 与人工标注的一致性', '',
-                  f'- 阈值 {val["threshold"]}：TP={p["tp"]} FP={p["fp"]} TN={p["tn"]} FN={p["fn"]}，'
-                  f'敏感度={sens}，特异度={spec}', '',
-                  '> 正例标签由正则模式给出、经逐条人工确认，是**真检出的下界**不是真值；',
-                  '> 负例标签来自非错配条件。这是临时金标准，用于评估判读流程本身。',
-                  '> 不要用 pilot 数据估算检出率——pilot 正例是按正则挑出的富集样本。',
-                  '']
     (OUT / 'REPORT.md').write_text('\n'.join(lines), encoding='utf-8')
     print(json.dumps(summary, indent=2, ensure_ascii=False))
     print(f'\nwrote {OUT / "REPORT.md"}')
@@ -742,7 +667,7 @@ def cmd_report(args) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('command', choices=('prep', 'run', 'pilot', 'validate', 'report'))
+    parser.add_argument('command', choices=('prep', 'run', 'report'))
     parser.add_argument('--workers', type=int, default=8)
     parser.add_argument('--threshold', type=float, default=DEFAULT_THRESHOLD)
     parser.add_argument('--confidence', type=float, default=DEFAULT_CONFIDENCE_GATE)
@@ -751,8 +676,7 @@ def main() -> None:
     parser.add_argument('--arms', nargs='*', choices=ARMS)
     parser.add_argument('--force', action='store_true')
     args = parser.parse_args()
-    {'prep': cmd_prep, 'run': cmd_run, 'pilot': cmd_pilot,
-     'validate': cmd_validate, 'report': cmd_report}[args.command](args)
+    {'prep': cmd_prep, 'run': cmd_run, 'report': cmd_report}[args.command](args)
 
 
 if __name__ == '__main__':
