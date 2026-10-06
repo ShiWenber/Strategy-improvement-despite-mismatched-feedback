@@ -95,8 +95,8 @@ ON focused comparisons use a two-test Holm family. Qwen OFF, ON and ON-minus-OFF
 | Qwen comparisons | `results/qwen3_8/analyze.py` | Qwen requests and H -> per-mode and combined `ANALYSIS_reproduct.json` |
 | Fixed-pool N/G/U/B policies | `experiments.direct_reciprocity.role_analysis` | Selection scores and H from the same pools -> `role_analysis/ANALYSIS_reproduct.json` |
 | Candidate distributions and selection outcomes | `tools/analyze_population.py` | 480 DeepSeek OFF/ON candidates and S3 decisions -> `population_summary_reproduct.json` |
-| Opponent-family payoffs | `paper_zh_direct/tools/analyze_opponent_profiles.py` | Per-opponent H payoffs -> `figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json` |
-| Independent behavioural stages | `paper_zh_direct/tools/plot_behavior_evidence.py` | F′ and sealed S3 decisions -> `behavior/ANALYSIS_reproduct.json` |
+| Opponent-family payoffs | `tools/figures/analyze_opponent_profiles.py` | Per-opponent H payoffs -> `figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json` |
+| Independent behavioural stages | `tools/figures/plot_behavior_evidence.py` | F′ and sealed S3 decisions -> `behavior/ANALYSIS_reproduct.json` |
 | Mismatch distances and sensitivity | `experiments.direct_reciprocity.mismatch_distance` | F reports for 240 initial strategies, 60 parent/donor pairs and candidate H -> distance files with `_reproduct` appended to their stems |
 | Cross-model summary | `results/model_comparison_20260928/cross_model_summary.py` | Four configurations and paired population vectors -> `cross_model_mainline_data_reproduct.json` |
 | Visible-reasoning label checks | Cached recount in `tools/reproduce.py` | 240 labels in `results/mismatch_detection_jev/judgments/` -> `reproduct/jev_recount.json` |
@@ -111,11 +111,11 @@ Visible-reasoning checks cover 120 DeepSeek ON traces per condition. Cached extr
 
 ## Figures, tables and exported data
 
-`reproduct/` is a flat directory containing regenerated numerical data and figures. Source code and intermediate summaries stay in their normal project locations. Main figures use `fig2` and `fig3`; supplementary figures use `figS1`-`figS6`, each in PNG/PDF/SVG formats.
+`reproduct/` is a flat directory containing regenerated numerical data and figures. Plotting source code is in `tools/figures/`; intermediate summaries stay beside the corresponding paper data. Figure 1 source assets are in `assets/`. Main figures use `fig2` and `fig3`; supplementary figures use `figS1`-`figS6`, each in PNG/PDF/SVG formats.
 
 | Paper item | Reproduction output | Script and data |
 | --- | --- | --- |
-| Figure 1 | `paper_zh_direct/figures/figure1.pdf` and PNG | Method schematic with an editable PPTX source; use the supplied PDF to compile the paper |
+| Figure 1 | `assets/figure1.pdf` and PNG | Method schematic supplied as PDF/PNG, with editable source in `assets/figure1_editable.pptx` |
 | Figure 2 | `reproduct/fig2.*` | `plot_results_three_figures.py`; cross-model matching and paired population Raw/S3 gains |
 | Figure 3 | `reproduct/fig3.*` | Same script; opponent-family payoffs and independent behaviour |
 | Figure S1 | `reproduct/figS1.*` | `plot_camera_ready.py --figures 3`; both conditions, three selectors and OFF/ON |
@@ -168,25 +168,7 @@ uv run --frozen python -m experiments.direct_reciprocity.specificity all --outpu
 
 A complete batch makes 240 initialization calls and 240 candidate calls. Offline reproduction does not require this step. Generation has no model sampling seed, and API aliases may change, so new API samples cannot guarantee identical text or numerical results. ON/Qwen generators accept `--source` pointing to a completed new OFF experiment and require distinct output directories. The optional Jev relabeling script annotates report-origin questions and handling; it does not generate strategy candidates.
 
-## Compile the manuscripts and verify the project
-
-The English main manuscript is `paper_interface_focus/main.tex`, with supplementary material in `paper_interface_focus/supplement.tex`. The Chinese manuscript is `paper_zh_direct/main.tex`. Both use the official figures in `paper_zh_direct/figures/`; reproduced figures remain in `reproduct/`.
-
-Compiled copies are supplied as the [English main manuscript](paper_interface_focus/main.pdf), [English supplement](paper_interface_focus/supplement.pdf) and [Chinese manuscript](paper_zh_direct/main.pdf).
-
-Install Tectonic or XeLaTeX separately from the Python environment. The Chinese manuscript requires SimSun/SimHei/KaiTi/FangSong; the English manuscript uses Times New Roman/Arial/Consolas. Tectonic may download TeX packages on its first run. `--only-cached` requires an existing TeX cache.
-
-```sh
-cd paper_interface_focus
-tectonic main.tex
-tectonic supplement.tex
-tectonic main.tex
-cd ../paper_zh_direct
-tectonic main.tex
-cd ..
-```
-
-The English supplement uses `xr` to reference main-manuscript labels; compile the main manuscript first and again after the supplement to refresh references in both directions. Author affiliations and the corresponding email remain TODO fields.
+## Verify the project
 
 From the project root, install the locked test extra and run the tests through uv:
 

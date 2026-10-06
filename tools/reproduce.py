@@ -139,12 +139,12 @@ def statistics():
     run('population_statistics', ['tools/analyze_population.py'])
     rel = 'results/reciprocity_population_visuals_20260924/population_summary.json'
     compare('population distributions and selection counts', frozen(rel)['configurations'], read(WORK / rel)['configurations'])
-    run('opponent_statistics', ['paper_zh_direct/tools/analyze_opponent_profiles.py'])
+    run('opponent_statistics', ['tools/figures/analyze_opponent_profiles.py'])
     rel = 'results/figure4_opponent_profiles_20260926/ANALYSIS.json'
     before, after = frozen(rel), read(WORK / rel)
     for config in ['non_thinking', 'thinking']:
         compare('opponent ' + config, before['configs'][config]['summaries'], after['configs'][config]['summaries'])
-    run('behavior_statistics', ['paper_zh_direct/tools/plot_behavior_evidence.py'])
+    run('behavior_statistics', ['tools/figures/plot_behavior_evidence.py'])
     rel = 'results/reciprocity_population_visuals_20260924/behavior/ANALYSIS.json'
     before, after = frozen(rel), read(WORK / rel)
     for config in ['non_thinking', 'thinking']:
@@ -217,7 +217,7 @@ def export_data():
 
 
 def figures():
-    scripts = 'paper_zh_direct/tools/'
+    scripts = 'tools/figures/'
     run('main_figures', [scripts + 'plot_results_three_figures.py'])
     run('full_selectors_and_policy', [scripts + 'plot_camera_ready.py', '--figures', '3', '4', '5'])
     run('full_distributions', [scripts + 'build_interface_figures.py'])

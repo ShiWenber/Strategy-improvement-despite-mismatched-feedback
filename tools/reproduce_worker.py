@@ -16,10 +16,6 @@ import socket
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-FIGURES = {'if_results_matching': 'fig2', 'if_payoff_behavior': 'fig3',
-           'figure3': 'figS1', 'if_generation_selection': 'figS2',
-           'figure5': 'figS3', 'if_opponent_profiles': 'figS4',
-           'figure4': 'figS5', 'if_mismatch_distance': 'figS6'}
 
 
 def route(file, writing):
@@ -31,12 +27,7 @@ def route(file, writing):
     parts = path.relative_to(ROOT).parts
     if '_reproduct' in path.stem or parts[0] in ('reproduct', 'tmp'):
         return file
-    if len(parts) > 2 and parts[0].startswith('paper_') and 'figures' in parts:
-        stem = FIGURES.get(path.stem)
-        target = ROOT / ('reproduct' if stem else 'tmp/reproduction') / ((stem or path.stem) + path.suffix)
-    elif len(parts) > 2 and parts[0].startswith('paper_') and 'audit' in parts:
-        target = ROOT / 'results/reproduction' / (path.stem + '_reproduct' + path.suffix)
-    elif parts[0] in ('results', 'docs') or (parts[0].startswith('paper_') and 'tables' in parts):
+    if parts[0] in ('results', 'docs'):
         target = path.with_name(path.stem + '_reproduct' + path.suffix)
     else:
         return file
