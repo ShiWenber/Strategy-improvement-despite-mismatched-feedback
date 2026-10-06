@@ -1,4 +1,5 @@
 """Audit and summarize complete paired Qwen3.8-Flash experiment batches."""
+import argparse
 import json
 from pathlib import Path
 import sys
@@ -10,13 +11,13 @@ WORKSPACE = ROOT.parents[1]
 sys.path.insert(0, str(WORKSPACE))
 
 from experiments.direct_reciprocity.core import Policy, digest
-from experiments.direct_reciprocity.qwen38_control import SOURCE, filehash, specification, verify
+from experiments.direct_reciprocity.qwen38_control import SOURCE, filehash, specification
 from experiments.direct_reciprocity.run import read_json, write_json
 from experiments.direct_reciprocity.specificity_analysis import contrast, holm
 from thinking_control_analysis import aggregate
 
 
-def audit(root, manifest):
+def audit(root, manifest, source=SOURCE):
     root = Path(root)
     read_json(root / 'COMPLETE.json')
     selections = read_json(root / 'SELECTIONS_SEALED.json')
@@ -55,7 +56,7 @@ def audit(root, manifest):
             issues.append(identity + ': candidate differs from response')
         if selections['candidate_hashes'][identity] != digest((root / 'candidates' / (identity + '.json')).read_text(encoding='utf-8')):
             issues.append(identity + ': candidate changed after selection')
-        if filehash(root / 'holdout' / (job['context'] + '.json')) != filehash(SOURCE / 'holdout' / (job['context'] + '.json')):
+        if filehash(root / 'holdout' / (job['context'] + '.json')) != filehash(Path(source) / 'holdout' / (job['context'] + '.json')):
             issues.append(identity + ': parent H changed')
         for setting in ('default', 'noise01', 'long'):
             for metric in ('score', 'cooperation', 'worst_score'):
@@ -75,17 +76,18 @@ def audit(root, manifest):
                 .8 * usage['prompt_tokens'] / 1e6 + 2.7 * usage['completion_tokens'] / 1e6}
 
 
-def analyze():
+def analyze(input_root=ROOT, source=SOURCE, output_suffix=""):
+    input_root = Path(input_root)
     reports = {}
     for mode in ('off', 'on'):
-        root = ROOT / mode
+        root = input_root / mode
         manifest = read_json(root / 'manifest.json')
-        aud = audit(root, manifest)
-        write_json(root / 'AUDIT.json', aud)
+        aud = audit(root, manifest, source)
+        write_json(root / f'AUDIT{output_suffix}.json', aud)
         if aud['issues']:
             raise RuntimeError(f'{mode}: {len(aud["issues"])} audit issues')
         reports[mode] = {'audit': aud, 'result': aggregate(root, manifest)}
-        write_json(root / 'ANALYSIS.json', reports[mode])
+        write_json(root / f'ANALYSIS{output_suffix}.json', reports[mode])
     def vector(mode, arm):
         return np.asarray(reports[mode]['result']['raw'][arm]['metrics']['default/score']['seed_values'])
     focus = {mode: contrast(vector(mode, 'accurate') - vector(mode, 'mismatched'))
@@ -97,7 +99,7 @@ def analyze():
         value['holm_p'] = adjusted[key]
     summary = {'model': 'qwen3.8-flash', 'modes': reports, 'focus': focus,
                'limitation': 'Thinking and max_tokens differ between modes; H was already used historically.'}
-    write_json(ROOT / 'ANALYSIS.json', summary)
+    write_json(input_root / f'ANALYSIS{output_suffix}.json', summary)
     lines = ['# Qwen3.8-Flash paired replication', '',
              'Same frozen 20 populations, 60 parents and 240 prompts per mode. H was previously used.', '',
              '| Mode | Valid / 240 | Raw Accurate | Raw Mismatched | S3 Accurate | S3 Mismatched | Input tokens | Output tokens | Uncached list cost (CNY) |',
@@ -112,9 +114,14 @@ def analyze():
     for key, value in focus.items():
         lines.append(f"- {key}: raw Accurate − Mismatched {value['mean']:+.5f} payoff per round; Holm p={value['holm_p']:.5f}.")
     lines.extend(['', 'Thinking and output limit differ between modes (6,000 vs 131,072); the mode contrast does not isolate thinking alone. The cost assumes uncached Beijing list prices and can differ from the actual bill.', ''])
-    (ROOT / 'REPORT.md').write_text('\n'.join(lines), encoding='utf-8')
+    (input_root / f'REPORT{output_suffix}.md').write_text('\n'.join(lines), encoding='utf-8')
     return summary
 
 
 if __name__ == '__main__':
-    analyze()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--root', type=Path, default=ROOT)
+    parser.add_argument('--source', type=Path, default=SOURCE)
+    parser.add_argument('--output-suffix', default='')
+    args = parser.parse_args()
+    analyze(args.root, args.source, args.output_suffix)

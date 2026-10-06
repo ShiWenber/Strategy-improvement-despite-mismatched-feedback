@@ -6,6 +6,7 @@ No experiments, model requests, games, bootstrap samples or tests are run.
 """
 from __future__ import annotations
 from hashlib import sha256
+import argparse
 import json
 import os
 import sys
@@ -22,6 +23,7 @@ import numpy as np
 from results_plot_style import apply_style, panel_heading, top_legend, IntervalKey
 SOURCES = {}
 READ_KEYS = {}
+ANALYSIS_SUFFIX = ""
 ORDER = ['DeepSeek/OFF', 'DeepSeek/ON', 'Qwen/OFF', 'Qwen/ON']
 DISPLAY_MODELS = {'DeepSeek': 'deepseek-v4.1-flash', 'Qwen': 'qwen3.8-flash'}
 SEEDS = list(range(200, 220))
@@ -30,6 +32,10 @@ BLUE, ORANGE, DARK, GREY = ('#0072B2', '#D55E00', '#303030', '#737373')
 WIDTH, HEIGHT = (175 / 25.4, 138 / 25.4)
 
 def read(rel, keys):
+    path = Path(rel)
+    if path.name != 'manifest.json':
+        path = path.with_name(path.stem + ANALYSIS_SUFFIX + path.suffix)
+    rel = path.as_posix()
     raw = (ROOT / rel).read_bytes()
     SOURCES[rel] = sha256(raw).hexdigest()
     READ_KEYS[rel] = keys
@@ -260,7 +266,7 @@ def save(fig, directory, stem):
     overlaps = [t.get_text() for t in meta['panel_headings'] + meta['scope_texts'] if legend_box.overlaps(t.get_window_extent(renderer))]
     assert not overlaps, overlaps
     assert all(t.get_fontsize() == 9.5 and t.get_fontweight() == 'bold' and t.get_ha() == 'left' for t in meta['panel_headings'])
-    directory.mkdir(exist_ok=True)
+    directory.mkdir(parents=True, exist_ok=True)
     exports = {}
     for extension in ['pdf', 'svg', 'png']:
         path = directory / f'{stem}.{extension}'
@@ -278,15 +284,24 @@ def save(fig, directory, stem):
     return result
 
 def main():
+    global ROOT, ANALYSIS_SUFFIX
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--work', type=Path, default=ROOT)
+    parser.add_argument('--analysis-suffix', default='')
+    parser.add_argument('--output-dir', type=Path)
+    parser.add_argument('--audit-dir', type=Path)
+    args = parser.parse_args()
+    ROOT, ANALYSIS_SUFFIX = args.work.resolve(), args.analysis_suffix
+    output = (args.output_dir or ROOT / 'reproduct').resolve()
     cross, pairs, opponents, behavior = load()
     figure1_paths = [ROOT / 'assets/figure1.png']
     figure1_before = {str(p): sha256(p.read_bytes()).hexdigest() for p in figure1_paths}
-    exports = {'figure2': save(figure2(cross, pairs), ROOT / 'reproduct', 'fig2'),
-               'figure3': save(figure3(opponents, behavior), ROOT / 'reproduct', 'fig3')}
+    exports = {'figure2': save(figure2(cross, pairs), output, 'fig2'),
+               'figure3': save(figure3(opponents, behavior), output, 'fig3')}
     for rel, digest in SOURCES.items():
         assert sha256((ROOT / rel).read_bytes()).hexdigest() == digest
     assert figure1_before == {str(p): sha256(p.read_bytes()).hexdigest() for p in figure1_paths}
-    qa_directory = ROOT / 'results/reproduction'
+    qa_directory = args.audit_dir or ROOT / 'results/reproduction'
     qa_directory.mkdir(parents=True, exist_ok=True)
     for number, stem in [('figure2', 'fig2'), ('figure3', 'fig3')]:
         qa = {'status': 'passed', 'asset': stem, 'figure_language': 'English',

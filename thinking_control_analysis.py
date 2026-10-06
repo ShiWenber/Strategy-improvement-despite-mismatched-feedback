@@ -14,7 +14,7 @@ from experiments.direct_reciprocity.specificity_analysis import contrast, summar
 from experiments.direct_reciprocity.thinking_control import DEFAULT_ROOT, SOURCE, specification, filehash
 
 
-def audit(root, m):
+def audit(root, m, source=SOURCE):
     root = Path(root)
     issues, records = [], []
     release = read_json(root/'H_RELEASED.json')
@@ -54,7 +54,7 @@ def audit(root, m):
                 code = '\n'.join(code.strip().splitlines()[1:-1])
             if child['child']['code'] != code:
                 issues.append(identity+': code differs from returned content')
-        if filehash(root/'holdout'/(j['context']+'.json')) != filehash(SOURCE/'holdout'/(j['context']+'.json')):
+        if filehash(root/'holdout'/(j['context']+'.json')) != filehash(Path(source)/'holdout'/(j['context']+'.json')):
             issues.append(identity+': reused parent differs')
         if selected['candidate_hashes'][identity] != digest((root/'candidates'/(identity+'.json')).read_text(encoding='utf-8')):
             issues.append(identity+': candidate changed after selection')
@@ -131,14 +131,14 @@ def paired_focus(new, old):
     return out
 
 
-def analyze(root):
-    root = Path(root)
+def analyze(root, source=SOURCE, source_analysis="ANALYSIS.json", output_suffix=""):
+    root, source = Path(root), Path(source)
     m = read_json(root / 'manifest.json')
-    aud = audit(root,m)
-    write_json(root/'AUDIT.json',aud)
+    aud = audit(root,m,source)
+    write_json(root/f'AUDIT{output_suffix}.json',aud)
     if aud['issues']: raise RuntimeError('Audit failed; do not interpret results')
-    new, old = aggregate(root,m), aggregate(SOURCE,m)
-    old_saved = read_json(SOURCE/'ANALYSIS.json')
+    new, old = aggregate(root,m), aggregate(source,m)
+    old_saved = read_json(source/source_analysis)
     for arm in m['arms']:
         for setting in ('default','noise01','long'):
             x = old['raw'][arm]['metrics'][setting+'/score']['seed_values']
@@ -161,7 +161,7 @@ def analyze(root):
     result = {'audit':aud, 'thinking':new, 'historical':old, 'focus_holm_two':focus,
               'configuration_differences_exploratory':exploratory, 'limitations':limitation,
               'analysis_source_hash':filehash(__file__)}
-    write_json(root/'ANALYSIS.json',result)
+    write_json(root/f'ANALYSIS{output_suffix}.json',result)
     lines = ['# 原生思考模式 384K：历史配对补充实验','',
              f"完成 {aud['requests']} 次新候选调用，有效 {aud['statuses'].get('valid',0)} 个；记录审计问题 {len(aud['issues'])}。",
              '','同一 60 个父代、两种报告条件、每组两个候选。thinking=enabled，reasoning_effort=high，max_tokens=384000。','',
@@ -177,7 +177,7 @@ def analyze(root):
     lines += ['',limitation,'',f"最终候选请求报告 token {aud['total_tokens']:,}，输出 token {aud['completion_tokens']:,}；其中包含思考。384K 是上限，不能当作实际用量。",
               f"另有归档请求尝试 {aud['archived_attempts']} 条，其中 {aud['archived_attempts_usage_missing']} 条缺少用量；归档尝试已报告 token {aud['archived_attempts_reported_total_tokens']:,}。上述已报告用量不代表包含中断请求的完整账单。",
               '', '该报告列出效应与审计事实；是否形成新的论文主张需结合行为结果和上述适用范围解释。','']
-    (root/'REPORT.md').write_text('\n'.join(lines),encoding='utf-8')
+    (root/f'REPORT{output_suffix}.md').write_text('\n'.join(lines),encoding='utf-8')
     print(json.dumps({'audit_issues':aud['issues'],'focus':focus},ensure_ascii=False))
     return result
 
@@ -185,4 +185,8 @@ def analyze(root):
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('root',nargs='?',default=str(DEFAULT_ROOT))
-    analyze(parser.parse_args().root)
+    parser.add_argument('--source', type=Path, default=SOURCE, help='Shared OFF parent records.')
+    parser.add_argument('--source-analysis', default='ANALYSIS.json')
+    parser.add_argument('--output-suffix', default='')
+    args = parser.parse_args()
+    analyze(args.root, args.source, args.source_analysis, args.output_suffix)

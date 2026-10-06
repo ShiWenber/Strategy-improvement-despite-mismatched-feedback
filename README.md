@@ -12,25 +12,13 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and Git, t
 git clone https://github.com/ShiWenber/Strategy-improvement-despite-mismatched-feedback.git
 cd Strategy-improvement-despite-mismatched-feedback
 uv sync --frozen
-uv run --frozen python tools/reproduce.py
 ```
 
 [`.python-version`](.python-version) selects Python 3.12. [`pyproject.toml`](pyproject.toml) defines the project and its dependencies, and [`uv.lock`](uv.lock) fixes their resolved versions. uv creates and manages the project environment; the same commands work on Windows, Linux and macOS without activating an environment or specifying its interpreter path. `--frozen` prevents changes to the lockfile during reproduction. See the [uv project documentation](https://docs.astral.sh/uv/guides/projects/).
 
-The first sync may download Python, packages and build dependencies. After setup, add `--offline` to `uv run` to disable dependency downloads. The reproduction pipeline itself uses recorded model responses and blocks network access in its workers; it makes **no LLM API calls**.
+The first sync may download Python, packages and build dependencies. After setup, add `--offline` to `uv run` to disable dependency downloads. The commands below read recorded model responses and cached labels; they make **no LLM API calls**. Run the analysis commands first, then the figure/table commands, sampled replay and tests. They use the same entry points as the original analyses, with explicit input/output arguments.
 
-The complete run verifies input hashes, recomputes statistics, exports data, regenerates figures and replays a sample of games. Inspect `results/reproduction/verification_reproduct.json`: `status` should be `passed`, all statistical comparisons should pass, and replay error should be at most `1e-12`.
-
-Individual stages use the same uv environment:
-
-```sh
-uv run --frozen python tools/reproduce.py --stage prepare
-uv run --frozen python tools/reproduce.py --stage statistics
-uv run --frozen python tools/reproduce.py --stage figures
-uv run --frozen python tools/reproduce.py --stage replay
-```
-
-Run `statistics` before `figures` because the figures consume the recomputed `_reproduct` summaries. Each invocation writes a report for that stage; run the command without `--stage` to obtain a complete verification report.
+Generated intermediate filenames append `_reproduct` beside the corresponding paper files. Plotting reads those recomputed summaries explicitly, so a missing file raises an error. Numerical exports and replay results also use `_reproduct` filenames in the flat `reproduct/` directory; figures retain the paper identifiers `fig2`, `fig3` and `figS1`-`figS6`.
 
 ## Paper data and file structure
 
@@ -86,7 +74,20 @@ ON focused comparisons use a two-test Holm family. Qwen OFF, ON and ON-minus-OFF
 
 ## Reproduce each analysis
 
-`tools/reproduce.py` is the entry point. It invokes the scripts below through `tools/reproduce_worker.py`, which routes generated summaries to filenames with the `_reproduct` suffix beside their paper counterparts. Use the entry point to preserve the summaries used by the paper.
+Run these existing entry points in order from the project root. `--output-suffix` names generated files; `--analysis-suffix` or `--analysis-file` selects the recomputed inputs for downstream analyses.
+
+```sh
+uv run --frozen python -m experiments.direct_reciprocity.specificity_analysis results/feedback_specificity_v2 --output-suffix _reproduct
+uv run --frozen python thinking_control_analysis.py results/feedback_specificity_thinking_384k_20260923 --source results/feedback_specificity_v2 --source-analysis ANALYSIS_reproduct.json --output-suffix _reproduct
+uv run --frozen python results/qwen3_8/analyze.py --root results/qwen3_8 --source results/feedback_specificity_v2 --output-suffix _reproduct
+uv run --frozen python -m experiments.direct_reciprocity.role_analysis results/feedback_specificity_v2 --analysis-file ANALYSIS_reproduct.json --output-suffix _reproduct
+uv run --frozen python tools/analyze_population.py --analysis-suffix _reproduct --output results/reciprocity_population_visuals_20260924/population_summary_reproduct.json
+uv run --frozen python tools/figures/analyze_opponent_profiles.py --analysis-suffix _reproduct --output results/figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json
+uv run --frozen python tools/figures/plot_behavior_evidence.py --analysis-suffix _reproduct --output results/reciprocity_population_visuals_20260924/behavior/ANALYSIS_reproduct.json
+uv run --frozen python -m experiments.direct_reciprocity.mismatch_distance --root . --output-suffix _reproduct
+uv run --frozen python results/model_comparison_20260928/cross_model_summary.py --analysis-suffix _reproduct --output results/model_comparison_20260928/cross_model_mainline_data_reproduct.json --csv-dir reproduct --output-suffix _reproduct
+uv run --frozen python tools/judge_mismatch_detection_summary.py report --judgments-dir results/mismatch_detection_jev/judgments --threshold 0.40 --confidence 0.60 --output-json reproduct/jev_recount_reproduct.json --output-markdown results/mismatch_detection_jev/REPORT_reproduct.md
+```
 
 | Analysis | Computational script | Inputs and recomputed summaries |
 | --- | --- | --- |
@@ -99,7 +100,7 @@ ON focused comparisons use a two-test Holm family. Qwen OFF, ON and ON-minus-OFF
 | Independent behavioural stages | `tools/figures/plot_behavior_evidence.py` | F′ and sealed S3 decisions -> `behavior/ANALYSIS_reproduct.json` |
 | Mismatch distances and sensitivity | `experiments.direct_reciprocity.mismatch_distance` | F reports for 240 initial strategies, 60 parent/donor pairs and candidate H -> distance files with `_reproduct` appended to their stems |
 | Cross-model summary | `results/model_comparison_20260928/cross_model_summary.py` | Four configurations and paired population vectors -> `cross_model_mainline_data_reproduct.json` |
-| Visible-reasoning label checks | Cached recount in `tools/reproduce.py` | 240 labels in `results/mismatch_detection_jev/judgments/` -> `reproduct/jev_recount.json` |
+| Visible-reasoning label checks | `tools/judge_mismatch_detection_summary.py report` | 240 labels in `results/mismatch_detection_jev/judgments/` -> `reproduct/jev_recount_reproduct.json` |
 
 Fixed-pool policy N randomly draws an existing candidate; G adds a parent gate to that draw; U randomly draws from eligible candidates; B selects the highest-scoring eligible candidate. Expectations average the two possible draws exactly, without new model calls. The analysis reconstructs sealed decisions pool by pool and verifies B-N=(G-N)+(U-G)+(B-U). Policy bootstrap uses seed 20260920 and 20,000 draws.
 
@@ -112,6 +113,17 @@ Visible-reasoning checks cover 120 DeepSeek ON traces per condition. Cached extr
 ## Figures, tables and exported data
 
 `reproduct/` is a flat directory containing regenerated numerical data and figures. Plotting source code is in `tools/figures/`; intermediate summaries stay beside the corresponding paper data. Figure 1 source assets are in `assets/`. Main figures use `fig2` and `fig3`; supplementary figures use `figS1`-`figS6`, each in PNG/PDF/SVG formats.
+
+Generate the figures and tables from the `_reproduct` analysis files:
+
+```sh
+uv run --frozen python tools/figures/plot_results_three_figures.py --analysis-suffix _reproduct --output-dir reproduct
+uv run --frozen python tools/figures/plot_camera_ready.py --analysis-suffix _reproduct --figures 3 4 5 --output-dir reproduct
+uv run --frozen python tools/figures/build_interface_figures.py --input results/reciprocity_population_visuals_20260924/population_summary_reproduct.json --display-output results/figure_rendering/frozen_generation_display_reproduct.json --output-dir reproduct
+uv run --frozen python tools/figures/plot_opponent_profiles.py --input results/figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json --output-dir reproduct
+uv run --frozen python tools/figures/plot_mismatch_distance.py --inputs docs/direct_reciprocity/mismatch_distance/mismatch_distance_thinking_off_reproduct.json docs/direct_reciprocity/mismatch_distance/mismatch_distance_thinking_on_reproduct.json --output-dir reproduct
+uv run --frozen python tools/export_paper_tables.py --work . --analysis-suffix _reproduct --output results/reproduction/tables --output-suffix _reproduct
+```
 
 | Paper item | Reproduction output | Script and data |
 | --- | --- | --- |
@@ -143,16 +155,22 @@ Reference mean payoff gains, equally averaging the two report conditions, are:
 
 S3 exceeds Raw in 79/80 population/configuration pairs: 19/20 for DeepSeek OFF and 20/20 for each other configuration. These pairs share 20 populations and are not 80 independent samples.
 
-`reproduct/candidate_gains.csv` contains 960 candidates across 3 test settings, or 2,880 rows. `population_gains.csv` contains 4 configurations x 2 conditions x 4 stages x 20 populations, or 640 rows. `condition_statistics.csv` contains 32 means and intervals.
+`reproduct/candidate_gains_reproduct.csv` contains 960 candidates across 3 test settings, or 2,880 rows. `population_gains_reproduct.csv` contains 4 configurations x 2 conditions x 4 stages x 20 populations, or 640 rows. `condition_statistics_reproduct.csv` contains 32 means and intervals.
 
 ## Game replay, dependencies and optional regeneration
 
 Default replay chooses the lexicographically first parent and first candidate in each condition from every configuration: 12 objects, independently of validity or payoff direction. Each valid object replays 240 default-H games, checking mean payoff, cooperation rate and worst-opponent payoff. Invalid programs are recorded without execution. Replay uses the project's simulator.
 
+Run the default sampled replay, which checks recorded outcomes and exits with an error if they differ:
+
+```sh
+uv run --frozen python tools/replay_worker.py --work . --output reproduct/replay_reproduct.json
+```
+
 To replay all default-H parent and candidate records:
 
 ```sh
-uv run --frozen python tools/replay_worker.py --work . --output reproduct/replay.json --full
+uv run --frozen python tools/replay_worker.py --work . --output reproduct/replay_full_reproduct.json --full
 ```
 
 A full replay may take hours. It covers default H, rather than all noise, longer-match and F′ measurements. Program failures or discrepancies are reported without replacing the paper data.
@@ -174,9 +192,9 @@ From the project root, install the locked test extra and run the tests through u
 
 ```sh
 uv sync --frozen --extra test
-uv run --frozen --extra test python -m pytest tests
+uv run --frozen --extra test python -m pytest tests --junitxml results/reproduction/verification_reproduct.xml
 ```
 
-Record checks validate request/program hashes, sealed records, shared parents, fallback arithmetic and reconstructed selections. Complete reproduction compares population vectors, means and intervals with the paper summaries. `results/reproduction/INPUT_MANIFEST.json` is checked before and after computation. Figure checks include minimum font size and text boundaries. Logs and verification reports use the `_reproduct` suffix under `results/reproduction/`.
+Record checks validate request/program hashes, sealed records, shared parents, fallback arithmetic and reconstructed selections. Tests in `tests/test_mainline_archive.py` verify all 5,658 input hashes and compare the recomputed population vectors, means and intervals with the paper summaries: 23 comparisons comprising 26,477 numbers, with absolute tolerance `1e-12`. They also check the CSV exports, cached label counts and sampled replay. Figure scripts check font sizes and text boundaries while rendering. The native pytest JUnit report is written to `results/reproduction/verification_reproduct.xml`.
 
-Reference verification covers 5,658 input hashes, 23 comparisons comprising 26,477 numerical values, and 2,640 sampled games, with maximum error 0 and zero API calls. The test suite contains 80 passing tests and 1 skipped test. See the [complete reproduction report](results/reproduction/verification_reproduct.json), [uv workflow validation](results/reproduction/uv_validation_reproduct.json) and [isolated-clone validation](results/reproduction/clean_clone_validation_reproduct.json).
+Reference validation reproduces 2,640 sampled games with maximum error 0 and zero LLM API calls. See the [test report](results/reproduction/verification_reproduct.xml) and [isolated-clone validation](results/reproduction/clean_clone_validation_reproduct.json).

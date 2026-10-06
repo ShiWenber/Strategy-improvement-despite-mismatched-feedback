@@ -33,7 +33,7 @@ def self_test():
         assert abs(p['gate'] + p['opportunity'] + p['ranking'] - p['total']) < 1e-12
 
 
-def run(root):
+def run(root, analysis_file="ANALYSIS.json", output_suffix=""):
     self_test()
     root = Path(root)
     hashes = {}
@@ -44,7 +44,7 @@ def run(root):
         return json.loads(raw)
 
     manifest = read('manifest.json')
-    frozen = read('ANALYSIS.json')
+    frozen = read(analysis_file)
     sealed = {(r['context'], r['arm'], r['rule']): r for r in read('SELECTIONS_SEALED.json')['rows']}
     jobs = defaultdict(list)
     for j in manifest['jobs']:
@@ -115,7 +115,7 @@ def run(root):
                   plan_sha256=hashlib.sha256(plan.read_bytes()).hexdigest(),
                   verification=dict(policy_edge_cases='passed', sealed_decisions_reconstructed=len(sealed),
                                     frozen_raw_and_selected_seed_values='passed', decomposition_identity='passed'))
-    (out/'ANALYSIS.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+    (out/f'ANALYSIS{output_suffix}.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
     lines = ['# 固定池角色分析（事后探索）', '', result['note'], '',
              'R=随机候选；G=随机候选后评价门控；U=合格候选中随机；B=合格候选中按分数最优。', '',
              '| 组别/规则 | R | G | U | B | B−R | G−R | U−G | B−U |',
@@ -131,11 +131,14 @@ def run(root):
     for arm, c in counts.items():
         lines.append(f"| {arm} | {c['better']} | {c['worse']} | {c['equal']} | {c['pools_with_better']} | {c['both_better']} |")
     lines += ['', '该分解依赖指定路径，不能把其比例解释为模型与评价器的一般因果贡献。全部区间为事后探索性结果。', '']
-    (out/'REPORT.md').write_text('\n'.join(lines), encoding='utf-8')
+    (out/f'REPORT{output_suffix}.md').write_text('\n'.join(lines), encoding='utf-8')
     return out
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('root', nargs='?', default='results/feedback_specificity_v2')
-    print(run(parser.parse_args().root))
+    parser.add_argument('--analysis-file', default='ANALYSIS.json', help='Input summary filename relative to root.')
+    parser.add_argument('--output-suffix', default='')
+    args = parser.parse_args()
+    print(run(args.root, args.analysis_file, args.output_suffix))

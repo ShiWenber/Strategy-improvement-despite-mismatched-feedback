@@ -4,6 +4,7 @@ No new analysis, model requests, or games. Writes figures to reproduct and
 a font/bounds report to results/reproduction; Figure 1 is untouched.
 """
 from hashlib import sha256
+import argparse
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,6 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 ROOT = REPO / 'results' / 'feedback_specificity_v2'
 OUT = REPO / 'reproduct'
-OUT.mkdir(parents=True, exist_ok=True)
 FIGURES = {3: 'figS1', 4: 'figS5', 5: 'figS3'}
 os.environ.setdefault('MPLCONFIGDIR', str(REPO/'.mplconfig'))
 import matplotlib
@@ -31,16 +31,6 @@ TEXTWIDTH = 175 / 25.4
 FRACTIONS = {3:1., 4:1., 5:1.}
 WIDTHS = {i: TEXTWIDTH*f for i,f in FRACTIONS.items()}
 
-data_path = ROOT/'ANALYSIS.json'
-role_path = ROOT/'role_analysis'/'ANALYSIS.json'
-thinking_path = REPO/'results/feedback_specificity_thinking_384k_20260923/ANALYSIS.json'
-data = json.loads(data_path.read_text(encoding='utf-8'))
-role = json.loads(role_path.read_text(encoding='utf-8'))
-thinking_report = json.loads(thinking_path.read_text(encoding='utf-8'))
-thinking = thinking_report['thinking']
-MODES = (('Thinking OFF', data), ('Thinking ON', thinking))
-assert not data['audit']['issues']
-apply_style()
 
 audits = []
 
@@ -105,14 +95,14 @@ def condition_legend(fig):
     return top_legend(fig, handles + [IntervalKey()], list(LABELS) + ['95% CI'], ncol=3)
 
 
-def make_figure3():
+def make_figure3(data, thinking):
     """Stored selector means and intervals; six parallel descriptive panels."""
     apply_style()
     fig, axes = plt.subplots(2, 3, figsize=(WIDTHS[3], 5.10), layout='constrained')
     fig.get_layout_engine().set(rect=(0, 0, 1, .875), w_pad=.035, h_pad=.065,
                                 wspace=.07, hspace=.14)
     condition_legend(fig)
-    for row, (mode, values) in enumerate(MODES):
+    for row, (mode, values) in enumerate((('Thinking OFF', data), ('Thinking ON', thinking))):
         for column, (rule, title) in enumerate(zip(
                 ('S1', 'S2', 'S3'),
                 ('S1: training (5)', 'S2: training (20)', 'S3: validation (20)'))):
@@ -128,7 +118,7 @@ def make_figure3():
     save(fig, 3)
 
 
-def make_figure4():
+def make_figure4(data):
     """Stored Thinking OFF raw proposal changes under both history settings."""
     apply_style()
     fig, axes = plt.subplots(2, 2, figsize=(WIDTHS[4], 4.85), sharex='col', layout='constrained')
@@ -154,7 +144,7 @@ def make_figure4():
     save(fig, 4)
 
 
-def make_figure5():
+def make_figure5(role):
     """Stored policy means and S3 paired decomposition; no new contrasts."""
     apply_style()
     fig, axes = plt.subplots(1, 2, figsize=(WIDTHS[5], 3.55), layout='constrained',
@@ -205,20 +195,37 @@ def make_figure5():
 
 
 def main():
-    import argparse
+    global OUT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--figures', nargs='+', type=int, choices=(3, 4, 5), default=[3, 4, 5])
+    parser.add_argument('--work', type=Path, default=REPO)
+    parser.add_argument('--analysis-suffix', default='')
+    parser.add_argument('--output-dir', type=Path)
+    parser.add_argument('--audit-dir', type=Path)
     args = parser.parse_args()
+    work = args.work.resolve()
+    OUT = args.output_dir or work / 'reproduct'
+    OUT.mkdir(parents=True, exist_ok=True)
+    audit_dir = args.audit_dir or work / 'results/reproduction'
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    name = f'ANALYSIS{args.analysis_suffix}.json'
+    data_path = work / 'results/feedback_specificity_v2' / name
+    role_path = work / 'results/feedback_specificity_v2/role_analysis' / name
+    thinking_path = work / 'results/feedback_specificity_thinking_384k_20260923' / name
+    data, role, thinking_report = [json.loads(p.read_text(encoding='utf-8')) for p in (data_path, role_path, thinking_path)]
+    assert not data['audit']['issues']
+    makers = {3: lambda: make_figure3(data, thinking_report['thinking']),
+              4: lambda: make_figure4(data), 5: lambda: make_figure5(role)}
     for index in args.figures:
-        globals()[f'make_figure{index}']()
+        makers[index]()
     provenance = {
-        'input_sha256': {str(p.relative_to(REPO)): sha256(p.read_bytes()).hexdigest()
+        'input_sha256': {str(p.relative_to(work)): sha256(p.read_bytes()).hexdigest()
                          for p in (data_path, role_path, thinking_path)},
         'script_sha256': sha256(Path(__file__).read_bytes()).hexdigest(),
         'textwidth_inches': TEXTWIDTH, 'figures': audits,
         'data_changes': False, 'new_analysis': False, 'new_model_calls': 0, 'new_games': 0,
         'note': 'Stored means and intervals rendered unchanged; only selected output targets are written.'}
-    (REPO / 'results/reproduction/FIGURE_FONT_AUDIT_reproduct.json').write_text(json.dumps(provenance, indent=2), encoding='utf-8')
+    (audit_dir / 'FIGURE_FONT_AUDIT_reproduct.json').write_text(json.dumps(provenance, indent=2), encoding='utf-8')
     print(json.dumps(audits, indent=2))
 
 

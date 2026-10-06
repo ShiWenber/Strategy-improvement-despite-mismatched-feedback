@@ -450,9 +450,9 @@ def run(jobs: list[Job], workers: int, force: bool = False) -> None:
                 print(f'[{done}/{len(jobs)}] FAIL {job.job_id}: {type(exc).__name__}: {exc}', flush=True)
 
 
-def load_judgments() -> list[dict]:
+def load_judgments(directory=None) -> list[dict]:
     return [json.loads(p.read_text(encoding='utf-8'))
-            for p in sorted((OUT / 'judgments').glob('*.json'))]
+            for p in sorted((directory or OUT / 'judgments').glob('*.json'))]
 
 
 # ---------------------------------------------------------------------------
@@ -516,7 +516,7 @@ def _confusion(rows: list[dict], threshold: float) -> dict:
 
 
 def cmd_report(args) -> None:
-    rows = load_judgments()
+    rows = load_judgments(args.judgments_dir)
     if not rows:
         print('nothing judged yet')
         return
@@ -569,7 +569,9 @@ def cmd_report(args) -> None:
         'by_arm': {k: {kk: vv for kk, vv in v.items() if kk != 'confident_ids'}
                    for k, v in by_arm.items()},
     }
-    (OUT / 'summary.json').write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding='utf-8')
+    output_json = args.output_json or OUT / 'summary.json'
+    output_json.parent.mkdir(parents=True, exist_ok=True)
+    output_json.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding='utf-8')
 
     pooled = [r for r in rows if r['arm'] != 'mismatched' and r.get('origin_prob_questions') is not None]
     pooled_leaning = sum(1 for r in pooled if r['origin_prob_questions'] >= thr)
@@ -659,9 +661,11 @@ def cmd_report(args) -> None:
                          f'resolution={match.get("resolution_choice")}')
         lines.append('')
 
-    (OUT / 'REPORT.md').write_text('\n'.join(lines), encoding='utf-8')
+    output_markdown = args.output_markdown or OUT / 'REPORT.md'
+    output_markdown.parent.mkdir(parents=True, exist_ok=True)
+    output_markdown.write_text('\n'.join(lines), encoding='utf-8')
     print(json.dumps(summary, indent=2, ensure_ascii=False))
-    print(f'\nwrote {OUT / "REPORT.md"}')
+    print(f'\nwrote {output_markdown}')
 
 
 def main() -> None:
@@ -675,6 +679,9 @@ def main() -> None:
     parser.add_argument('--only', nargs='*')
     parser.add_argument('--arms', nargs='*', choices=ARMS)
     parser.add_argument('--force', action='store_true')
+    parser.add_argument('--judgments-dir', type=Path, help='Cached labels used by report; no API calls.')
+    parser.add_argument('--output-json', type=Path)
+    parser.add_argument('--output-markdown', type=Path)
     args = parser.parse_args()
     {'prep': cmd_prep, 'run': cmd_run, 'report': cmd_report}[args.command](args)
 
