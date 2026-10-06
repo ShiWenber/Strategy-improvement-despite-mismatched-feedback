@@ -142,7 +142,7 @@ uv run --frozen python tools/export_paper_tables.py --work . --analysis-suffix _
 | Table S4 | `tableS4_selection_reproduct.csv/.tex` | S3-minus-N noise and longer-match checks |
 | Table S5 | `tableS5_distance_reproduct.csv/.tex` | Matching differences after excluding closest donors |
 
-The Chinese manuscript numbers appendices consecutively: Figures S1-S6 correspond to Figures 4-9, and Tables S1-S5 to Tables III-VII. `tools/export_paper_tables.py` writes tables to `results/reproduction/tables/`. Main Table 1 defines the report conditions; Table 2 defines S1/S2/S3 scoring and does not depend on API responses.
+Both manuscripts use Figures 1–3 and Tables I–II in the main text, and Figures S1–S6 and Tables S1–S5 in the appendices. `tools/export_paper_tables.py` writes the supplementary tables to `results/reproduction/tables/`. Main Tables I and II define the report conditions and S1/S2/S3 scoring, respectively; both contain fixed protocol definitions and require no API calls.
 
 Reference mean payoff gains, equally averaging the two report conditions, are:
 
