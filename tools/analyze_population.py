@@ -39,8 +39,8 @@ def main():
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     ROOT = args.work.resolve()
-    output = args.output or ROOT / 'results/reciprocity_population_visuals_20260924/population_summary.json'
-    output.parent.mkdir(parents=True, exist_ok=True)
+    destination = args.output or ROOT / 'results/reciprocity_population_visuals_20260924/population_summary.json'
+    destination.parent.mkdir(parents=True, exist_ok=True)
     data = {}
     for label, run in RUNS.items():
         path = ROOT / 'results' / run
@@ -80,7 +80,7 @@ def main():
             assert np.allclose(data[label][output], expected, atol=1e-12, rtol=0)
 
     report = {'configurations': data, 'new_games': 0, 'new_model_calls': 0, 'sources_sha256': sources}
-    output.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+    destination.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     print('Recomputed distributions and decisions for 480 candidates')
 
 
