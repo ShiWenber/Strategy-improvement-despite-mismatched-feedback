@@ -157,7 +157,7 @@ uv run --frozen python tools/replay_worker.py --work . --output reproduct/replay
 
 A full replay may take hours. It covers default H, rather than all noise, longer-match and F′ measurements. Program failures or discrepancies are reported without replacing the paper data.
 
-Dependencies are managed exclusively through `pyproject.toml` and `uv.lock`. NumPy supports arrays and bootstrap calculations, SciPy supplies KDE, Matplotlib renders figures, pandas supports analysis, OpenAI/httpx support optional API calls, python-dotenv loads local credentials, and tiktoken checks report lengths.
+Dependencies are managed exclusively through `pyproject.toml` and `uv.lock`. NumPy supports arrays and bootstrap calculations, SciPy supplies KDE, Matplotlib renders figures, pandas supports analysis, OpenAI/httpx support optional API calls, python-dotenv loads local credentials, and tiktoken checks report lengths. Tests or new generation may download the tokenizer encoding on first use; the default offline reproduction uses the recorded reports and needs no tokenizer download.
 
 To sample new strategies, copy `.env.example` to `.env` and configure the relevant API keys. Run generation in a new output directory:
 
