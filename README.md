@@ -132,4 +132,22 @@ uv run --frozen python -m experiments.direct_reciprocity.specificity_analysis re
 
 This run makes four candidate calls: two Accurate and two Mismatched. The same generation, selection, payoff evaluation and analysis code writes the new records and `ANALYSIS_reproduct.json` to `results/api_smoke_reproduct/`. Re-running a completed directory uses its recorded responses; choose a new output directory for additional API samples. A single population demonstrates the API-to-analysis workflow; recover the paper's statistics from the recorded-data commands above. New API outputs need not match the original generated programs.
 
+Continue through the downstream analyses and render the small-run figures and tables with the same entry points:
+
+```sh
+uv run --frozen python -m experiments.direct_reciprocity.role_analysis results/api_smoke_reproduct --analysis-file ANALYSIS_reproduct.json --output-suffix _reproduct
+uv run --frozen python tools/analyze_population.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --output results/api_smoke_reproduct/population_summary_reproduct.json
+uv run --frozen python tools/figures/analyze_opponent_profiles.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --output results/api_smoke_reproduct/opponent_profiles_reproduct.json
+uv run --frozen python tools/figures/plot_behavior_evidence.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --output results/api_smoke_reproduct/behavior_reproduct.json
+uv run --frozen python -m experiments.direct_reciprocity.mismatch_distance --run-root results/api_smoke_reproduct --out-dir results/api_smoke_reproduct --output-suffix _reproduct
+uv run --frozen python tools/figures/plot_results_three_figures.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
+uv run --frozen python tools/figures/plot_camera_ready.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --figures 3 4 5 --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
+uv run --frozen python tools/figures/build_interface_figures.py --input results/api_smoke_reproduct/population_summary_reproduct.json --display-output results/api_smoke_reproduct/frozen_generation_display_reproduct.json --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
+uv run --frozen python tools/figures/plot_opponent_profiles.py --input results/api_smoke_reproduct/opponent_profiles_reproduct.json --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
+uv run --frozen python tools/figures/plot_mismatch_distance.py --inputs results/api_smoke_reproduct/mismatch_distance_thinking_off_reproduct.json --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
+uv run --frozen python tools/export_paper_tables.py --work . --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --distance-input results/api_smoke_reproduct/mismatch_distance_thinking_off_reproduct.json --output results/api_smoke_reproduct --output-suffix _reproduct --figure-dir results/reproduction
+```
+
+The small run uses the paper's record and summary structures with one population, one parent and four candidates. It displays the DeepSeek OFF configuration in Figures [2](results/reproduction/fig2.png), [3](results/reproduction/fig3.png), and S1–S6, directly in `results/reproduction/` as PNG/PDF/SVG files. Tables I–II and S1–S5 are also viewable there as PNG/PDF files; CSV/TeX exports and numerical intermediates stay in `results/api_smoke_reproduct/`. Figure 1 is the shared method diagram in `assets/`. With one population, bootstrap intervals collapse to the observed means; Table S5 marks the distance sensitivity estimate as unavailable when there are too few parents.
+
 For a complete new experiment, omit `--source`, `--seeds` and `--ranks` at the freeze stage and use a separate output directory. Defaults make 240 initialization calls and 240 candidate calls. ON/Qwen generators accept `--source` pointing to a completed new OFF experiment and require distinct output directories.

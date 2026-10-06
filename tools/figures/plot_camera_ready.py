@@ -20,7 +20,8 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 from matplotlib.text import Text
 from matplotlib.lines import Line2D
-from results_plot_style import apply_style, panel_title, top_legend, IntervalKey
+from results_plot_style import apply_style, panel_title, panel_legend
+from results_plot_audit import render_audit
 import numpy as np
 
 ARMS = ('accurate', 'mismatched')
@@ -33,6 +34,8 @@ WIDTHS = {i: TEXTWIDTH*f for i,f in FRACTIONS.items()}
 
 
 audits = []
+INPUTS = []
+AUDIT_DIR = REPO/'results/reproduction'
 
 def dot(ax, row, y, color, marker, seeds=False):
     if seeds:
@@ -49,7 +52,7 @@ def dot(ax, row, y, color, marker, seeds=False):
 def setup(ax, labels=LABELS):
     ax.axvline(0,color='#444444',lw=.7,ls='--')
     ax.set_yticks(range(len(labels)),labels)
-    ax.set_ylim(len(labels)-.5,-.5)
+    ax.set_ylim(len(labels)-.5,-1.05)
     ax.grid(axis='x',color='#e5e5e5',linewidth=.55)
     ax.set_axisbelow(True)
     ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -82,27 +85,29 @@ def save(fig, index):
             clipped.append(artist.get_text())
     assert min(sizes) >= 8.5
     assert not clipped, (index,clipped)
-    for ext in ('pdf','svg','png'):
-        fig.savefig(OUT/f'{FIGURES[index]}.{ext}',dpi=300)
+    labels=[t.get_text() for ax in fig.axes for t in ax.get_legend().get_texts()]
+    render_audit(fig,FIGURES[index],INPUTS,__file__,labels,
+                 ['Stored population means and 95% bootstrap intervals are reused unchanged; interval definitions are in the caption.'],
+                 output_dir=OUT,audit_dir=AUDIT_DIR)
     audits.append(dict(figure=index,width_inches=fig.get_figwidth(),height_inches=fig.get_figheight(),
                        placement_fraction=FRACTIONS[index],minimum_artist_font_pt=min(sizes),
                        out_of_canvas_text=clipped))
     plt.close(fig)
 
-def condition_legend(fig):
+def condition_legend(ax):
     handles = [Line2D([], [], color=color, marker=marker, linestyle='none',
                       markersize=4.8) for color, marker in zip(COLORS, MARKERS)]
-    return top_legend(fig, handles + [IntervalKey()], list(LABELS) + ['95% CI'], ncol=3)
+    return panel_legend(ax, handles, list(LABELS), ncol=1)
 
 
-def make_figure3(data, thinking):
+def make_figure3(data, thinking=None):
     """Stored selector means and intervals; six parallel descriptive panels."""
     apply_style()
-    fig, axes = plt.subplots(2, 3, figsize=(WIDTHS[3], 5.10), layout='constrained')
-    fig.get_layout_engine().set(rect=(0, 0, 1, .875), w_pad=.035, h_pad=.065,
+    configurations = [('Thinking OFF', data)] + ([('Thinking ON', thinking)] if thinking else [])
+    fig, axes = plt.subplots(len(configurations), 3, figsize=(WIDTHS[3], 2.7 * len(configurations)), layout='constrained', squeeze=False)
+    fig.get_layout_engine().set(rect=(0, 0, 1, 1), w_pad=.035, h_pad=.065,
                                 wspace=.07, hspace=.14)
-    condition_legend(fig)
-    for row, (mode, values) in enumerate((('Thinking OFF', data), ('Thinking ON', thinking))):
+    for row, (mode, values) in enumerate(configurations):
         for column, (rule, title) in enumerate(zip(
                 ('S1', 'S2', 'S3'),
                 ('S1: training (5)', 'S2: training (20)', 'S3: validation (20)'))):
@@ -111,7 +116,8 @@ def make_figure3(data, thinking):
                 dot(ax, values['selected'][rule + '/' + arm]['metrics']['default'],
                     i, COLORS[i], MARKERS[i])
             setup(ax)
-            panel_title(ax, chr(97 + row * 3 + column), mode + '\n' + title)
+            panel_title(ax, chr(97 + row * 3 + column))
+            condition_legend(ax)
             ax.set_xlim(-.01, .14)
             ax.set_xticks([0, .05, .10])
             ax.set_xlabel('Payoff gain\nper round')
@@ -122,22 +128,22 @@ def make_figure4(data):
     """Stored Thinking OFF raw proposal changes under both history settings."""
     apply_style()
     fig, axes = plt.subplots(2, 2, figsize=(WIDTHS[4], 4.85), sharex='col', layout='constrained')
-    fig.get_layout_engine().set(rect=(0, 0, 1, .875), w_pad=.05, h_pad=.07,
+    fig.get_layout_engine().set(rect=(0, 0, 1, 1), w_pad=.05, h_pad=.07,
                                 wspace=.09, hspace=.12)
-    condition_legend(fig)
     for ri, mode in enumerate(('controlled', 'natural')):
         for ci, metric, title, xlabel in (
-            (0, 'recovery_time_capped', 'Recovery',
-             'Recovery-time change (rounds)\nLower = faster recovery'),
+            (0, 'recovery_time_capped', 'Capped recovery time',
+             'Change in capped recovery time\n(rounds)'),
             (1, 'sustained_unilateral_cooperation_last5', 'Defection exposure',
-             'Unilateral cooperation change\n(fraction; lower = less exposure)')):
+             'Unilateral cooperation change\n(fraction)')):
             ax = axes[ri, ci]
             for i, arm in enumerate(ARMS):
                 dot(ax, data['raw'][arm]['behavior'][mode + '/' + metric],
                     i, COLORS[i], MARKERS[i])
             setup(ax)
             history = 'Supplied CC' if mode == 'controlled' else 'Empty history'
-            panel_title(ax, chr(97 + 2 * ri + ci), 'Thinking OFF: ' + history + '\n' + title)
+            panel_title(ax, chr(97 + 2 * ri + ci))
+            condition_legend(ax)
             ax.set_xlabel(xlabel)
             ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
             ax.tick_params(axis='x', labelbottom=True)
@@ -149,17 +155,16 @@ def make_figure5(role):
     apply_style()
     fig, axes = plt.subplots(1, 2, figsize=(WIDTHS[5], 3.55), layout='constrained',
                              gridspec_kw={'width_ratios': [1.24, 1]})
-    fig.get_layout_engine().set(rect=(0, 0, 1, .84), w_pad=.04, h_pad=.05,
+    fig.get_layout_engine().set(rect=(0, 0, 1, 1), w_pad=.04, h_pad=.05,
                                 wspace=.09, hspace=.09)
     policy_colors = ('#777777', '#D55E00', '#0072B2')
     policy_markers = ('o', 's', '^')
     handles = [Line2D([], [], color=color, marker=marker, markersize=4.3, lw=1.2)
                for color, marker in zip(policy_colors, policy_markers)]
-    handles += [Line2D([], [], color='#0072B2', marker='o', linestyle='none', markersize=4.8),
-                Line2D([], [], color='#222222', marker='D', linestyle='none', markersize=4.8),
-                IntervalKey()]
-    top_legend(fig, handles, ['(a) S1 policy mean', '(a) S2 policy mean', '(a) S3 policy mean',
-                             '(b) Adjacent difference', '(b) Total difference', '95% CI'], ncol=3)
+    panel_legend(axes[0],handles,['S1','S2','S3'],ncol=3)
+    panel_legend(axes[1],[Line2D([], [], color='#0072B2', marker='o', linestyle='none', markersize=4.8),
+                         Line2D([], [], color='#222222', marker='D', linestyle='none', markersize=4.8)],
+                 ['Adjacent difference','Total difference'],ncol=1)
     for i, (rule, color) in enumerate(zip(('S1', 'S2', 'S3'), policy_colors)):
         row = role['summaries'][f'pooled/{rule}/default']
         x = np.arange(4) + (i - 1) * .075
@@ -170,10 +175,10 @@ def make_figure5(role):
                          marker=policy_markers[i], markersize=4.3, capsize=2.5, lw=1.2)
     axes[0].set_xticks(range(4), ['Random\nN', 'Gated\nG', 'Eligible\nU', 'Best\nB'])
     axes[0].set_ylabel('Test payoff gain per round')
-    panel_title(axes[0], 'a', 'Four fixed-pool policies\nThinking OFF, post hoc')
+    panel_title(axes[0], 'a')
     axes[0].axhline(0, color='#444444', ls='--', lw=.7)
     axes[0].grid(axis='y', alpha=.2)
-    axes[0].set_ylim(-.008, .047)
+    axes[0].set_ylim(-.01, .056)
     row = role['summaries']['pooled/S3/default']
     for i, k in enumerate(('gate', 'opportunity', 'ranking', 'total')):
         v = row[k]
@@ -184,22 +189,24 @@ def make_figure5(role):
                          markersize=4.8, capsize=3, lw=1.5)
     axes[1].set_yticks(range(4), ['Gate\nG − N', 'Opportunity\nU − G', 'Ranking\nB − U', 'Total\nB − N'])
     axes[1].invert_yaxis()
+    axes[1].set_ylim(3.5,-1.4)
     axes[1].tick_params(axis='y', length=0)
     axes[1].axvline(0, color='#444444', ls='--', lw=.7)
     axes[1].grid(axis='x', alpha=.2)
     axes[1].set_xlabel('Paired payoff difference\nper round')
-    panel_title(axes[1], 'b', 'S3 selection differences\nThinking OFF, post hoc')
+    panel_title(axes[1], 'b')
     axes[1].set_xlim(-.001, .032)
     axes[1].xaxis.set_major_locator(MaxNLocator(nbins=3))
     save(fig, 5)
 
 
 def main():
-    global OUT
+    global OUT, INPUTS, AUDIT_DIR
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--figures', nargs='+', type=int, choices=(3, 4, 5), default=[3, 4, 5])
     parser.add_argument('--work', type=Path, default=REPO)
     parser.add_argument('--analysis-suffix', default='')
+    parser.add_argument('--run-root', type=Path, help='Render one OFF experiment.')
     parser.add_argument('--output-dir', type=Path)
     parser.add_argument('--audit-dir', type=Path)
     args = parser.parse_args()
@@ -209,18 +216,22 @@ def main():
     audit_dir = args.audit_dir or work / 'results/reproduction'
     audit_dir.mkdir(parents=True, exist_ok=True)
     name = f'ANALYSIS{args.analysis_suffix}.json'
-    data_path = work / 'results/feedback_specificity_v2' / name
-    role_path = work / 'results/feedback_specificity_v2/role_analysis' / name
-    thinking_path = work / 'results/feedback_specificity_thinking_384k_20260923' / name
-    data, role, thinking_report = [json.loads(p.read_text(encoding='utf-8')) for p in (data_path, role_path, thinking_path)]
+    source = args.run_root.resolve() if args.run_root else work / 'results/feedback_specificity_v2'
+    data_path = source / name
+    role_path = source / 'role_analysis' / name
+    thinking_path = None if args.run_root else work / 'results/feedback_specificity_thinking_384k_20260923' / name
+    INPUTS = [data_path, role_path] + ([thinking_path] if thinking_path else [])
+    AUDIT_DIR = audit_dir
+    data, role = [json.loads(p.read_text(encoding='utf-8')) for p in (data_path, role_path)]
+    thinking = json.loads(thinking_path.read_text(encoding='utf-8'))['thinking'] if thinking_path else None
     assert not data['audit']['issues']
-    makers = {3: lambda: make_figure3(data, thinking_report['thinking']),
+    makers = {3: lambda: make_figure3(data, thinking),
               4: lambda: make_figure4(data), 5: lambda: make_figure5(role)}
     for index in args.figures:
         makers[index]()
     provenance = {
         'input_sha256': {str(p.relative_to(work)): sha256(p.read_bytes()).hexdigest()
-                         for p in (data_path, role_path, thinking_path)},
+                         for p in INPUTS},
         'script_sha256': sha256(Path(__file__).read_bytes()).hexdigest(),
         'textwidth_inches': TEXTWIDTH, 'figures': audits,
         'data_changes': False, 'new_analysis': False, 'new_model_calls': 0, 'new_games': 0,

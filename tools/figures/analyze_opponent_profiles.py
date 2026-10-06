@@ -26,12 +26,18 @@ def read(path):
 
 
 def main():
+    global SEEDS
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--work', type=Path, default=ROOT)
     parser.add_argument('--analysis-suffix', default='')
+    parser.add_argument('--run-root', type=Path, help='Analyze one OFF experiment.')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     work = args.work.resolve()
+    runs = [('non_thinking', args.run_root.resolve())] if args.run_root else [
+        ('non_thinking', work / 'results/feedback_specificity_v2'),
+        ('thinking', work / 'results/feedback_specificity_thinking_384k_20260923')]
+    SEEDS = sorted(read(runs[0][1] / 'manifest.json')['seeds'])
     indices = np.random.default_rng(BOOTSTRAP_SEED).integers(
         0, len(SEEDS), size=(N_BOOTSTRAP, len(SEEDS))
     )
@@ -68,8 +74,8 @@ def main():
             "intervals": "unadjusted descriptive intervals; not simultaneous intervals or confirmatory significance tests",
         },
         "aggregation": {
-            "raw": "For each arm, average two pre-generated candidate outputs within each parent, then equally average three parents per population, then 20 populations.",
-            "S3": "Use frozen S3 winner per parent and arm, or parent if no winner; equally average three parents per population, then 20 populations.",
+            "raw": "For each arm, average candidate outputs within each parent, then equally average parents per population and populations.",
+            "S3": "Use frozen S3 winner per parent and arm, or parent if no winner; equally average parents per population and populations.",
             "family": "Default H: three equally weighted opponents per family. Each family has weight 1/4 in overall H payoff. All values are payoff per round.",
             "fallback": "Use deployed.default, which substitutes the parent entire default record for invalid candidates or execution failure in default H. Keep these generation outputs in the summaries.",
         },
@@ -78,16 +84,13 @@ def main():
             "A family-specific contrast is not a causal mechanism or proof that the model repaired a particular behavioural deficit.",
             "No identified aggregate advantage is not equivalence, and an exploratory family pattern is not a confirmed matching benefit.",
             "OFF and ON comparisons are descriptive.",
-            "The independent sampling unit is population; 60 parents, 120 candidates, and 12 opponents are not independent experimental replications.",
+            "The independent sampling unit is population; parents, candidates and opponents are not independent experimental replications.",
         ],
         "configs": {},
     }
-    for mode, run in [
-        ("non_thinking", "feedback_specificity_v2"),
-        ("thinking", "feedback_specificity_thinking_384k_20260923"),
-    ]:
-        source = work / "results" / run
+    for mode, source in runs:
         manifest = read(source / "manifest.json")
+        assert sorted(manifest['seeds']) == SEEDS
         sealed = read(source / "SELECTIONS_SEALED.json")
         frozen = read(source / f"ANALYSIS{args.analysis_suffix}.json")
         expected = frozen["thinking"] if mode == "thinking" else frozen
@@ -99,7 +102,8 @@ def main():
         for job in manifest["jobs"]:
             if job["arm"] in ARMS:
                 grouped[job["context"], job["arm"]].append(job)
-        assert len(grouped) == 120
+        n_parents = len(SEEDS) * len(manifest['ranks'])
+        assert len(grouped) == n_parents * len(ARMS)
         rows = []
         failures = {arm: 0 for arm in ARMS}
         max_family_error = 0.0
@@ -146,8 +150,8 @@ def main():
             for arm in ARMS:
                 summaries[stage][arm] = {}
                 subset = [row for row in rows if row["arm"] == arm]
-                assert len(subset) == 60
-                assert all(sum(row["seed"] == seed for row in subset) == 3 for seed in SEEDS)
+                assert len(subset) == n_parents
+                assert all(sum(row["seed"] == seed for row in subset) == len(manifest['ranks']) for seed in SEEDS)
                 for family in FAMILIES:
                     values = [
                         mean(row["family_gains"][stage][family] for row in subset if row["seed"] == seed)
@@ -186,7 +190,7 @@ def main():
         result["configs"][mode] = {
             "source_root": source.relative_to(work).as_posix(),
             "source_files": ["manifest.json", "SELECTIONS_SEALED.json", "ANALYSIS.json", "holdout/<context>.json", "holdout/<candidate_id>.json"],
-            "n_parents": 60, "n_pools_included": 120, "n_raw_slots_included": 240,
+            "n_parents": n_parents, "n_pools_included": len(grouped), "n_raw_slots_included": len(manifest['jobs']),
             "default_H_fallback_slots_by_arm": failures,
             "n_S3_retained_parent_by_arm": {
                 arm: sum(row["winner"] is None for row in rows if row["arm"] == arm) for arm in ARMS
