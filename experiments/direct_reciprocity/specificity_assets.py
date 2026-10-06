@@ -1,9 +1,6 @@
 """Frozen v2 measurement assets. No test result enters generation or selection."""
 from dataclasses import asdict
-from pathlib import Path
 import json
-import os
-import sys
 from statistics import mean
 
 from .baselines import policy
@@ -17,10 +14,6 @@ REPEATS = 20
 
 
 def tokenizer():
-    deps = Path(__file__).resolve().parents[2] / '.research_deps'
-    if str(deps) not in sys.path:
-        sys.path.insert(0, str(deps))
-    os.environ.setdefault('TIKTOKEN_CACHE_DIR', str(deps / 'tiktoken_cache'))
     import tiktoken
     return tiktoken.get_encoding('cl100k_base')
 
