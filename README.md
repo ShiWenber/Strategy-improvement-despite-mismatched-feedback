@@ -4,6 +4,8 @@ This repository accompanies *Strategy improvement despite mismatched feedback: e
 
 The paper compares **Accurate** and **Mismatched** reports while holding the parent strategy, population code, game rules and genuine training scores fixed. Accurate supplies the parent's own numerical behavioural report; Mismatched supplies another strategy's report from the same population. Candidate quality before selection is evaluated separately from the quality of externally selected outputs.
 
+Only the English manuscript and its electronic supplementary material are maintained, in the local `paper_interface_focus/` project. Their figure inputs are under `paper_interface_focus/figures/`; `paper_interface_focus/tools/build.ps1` builds both documents.
+
 ## Reproduce with uv
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and Git, then run these commands from the project root:
@@ -11,14 +13,10 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and Git, t
 ```sh
 git clone https://github.com/ShiWenber/Strategy-improvement-despite-mismatched-feedback.git
 cd Strategy-improvement-despite-mismatched-feedback
-uv sync --frozen
+uv sync
 ```
 
-[`.python-version`](.python-version) selects Python 3.12. [`pyproject.toml`](pyproject.toml) defines the project and its dependencies, and [`uv.lock`](uv.lock) fixes their resolved versions. uv creates and manages the project environment; the same commands work on Windows, Linux and macOS without activating an environment or specifying its interpreter path. `--frozen` prevents changes to the lockfile during reproduction. See the [uv project documentation](https://docs.astral.sh/uv/guides/projects/).
-
-The first sync may download Python, packages and build dependencies. After setup, add `--offline` to `uv run` to disable dependency downloads. The commands below read recorded model responses and cached labels; they make **no LLM API calls**. Run the analysis commands first, followed by the figure/table commands. All commands use the existing project scripts with explicit input and output arguments.
-
-Generated intermediate filenames append `_reproduct` beside the corresponding paper files. Numerical summaries and CSV exports stay in their respective data directories. The flat `reproduct/` directory contains only regenerated figures: `fig2`, `fig3` and `figS1`-`figS6`, available as PNG, PDF and SVG. Figure 1 is the method schematic in `assets/`.
+The analysis and figure/table commands below use recorded responses and cached labels, with **no LLM API calls**. Run them in order from the project root.
 
 ## Paper data and file structure
 
@@ -37,7 +35,7 @@ The paper names the DeepSeek model deepseek-v4.1-flash; recorded requests use th
 
 ### Record types
 
-Paths below are relative to each experiment directory unless stated otherwise.
+Paths are relative to each experiment directory unless stated otherwise. ON and Qwen records use the shared parents.
 
 | File/directory | Contents and use |
 | --- | --- |
@@ -52,102 +50,91 @@ Paths below are relative to each experiment directory unless stated otherwise.
 | `holdout/<id>.json` | Payoff and independent behaviour measurements and gains over parents |
 | `ANALYSIS.json`, `AUDIT.json` | Reference analysis summaries |
 
-The ON and Qwen directories contain the supporting records for the shared parents. Reproduction reads these records in place.
-
 ## Reproduce each analysis
 
-Run these existing entry points in order from the project root. `--output-suffix` names generated files; `--analysis-suffix` or `--analysis-file` selects the recomputed inputs for downstream analyses.
+`--output-suffix _reproduct` appends the suffix to generated filenames beside the paper data; `--analysis-suffix` or `--analysis-file` selects these outputs as downstream inputs. The table maps each command, in order, to its analysis and outputs.
 
 ```sh
-uv run --frozen python -m experiments.direct_reciprocity.specificity_analysis results/feedback_specificity_v2 --output-suffix _reproduct
-uv run --frozen python thinking_control_analysis.py results/feedback_specificity_thinking_384k_20260923 --source results/feedback_specificity_v2 --source-analysis ANALYSIS_reproduct.json --output-suffix _reproduct
-uv run --frozen python results/qwen3_8/analyze.py --root results/qwen3_8 --source results/feedback_specificity_v2 --output-suffix _reproduct
-uv run --frozen python -m experiments.direct_reciprocity.role_analysis results/feedback_specificity_v2 --analysis-file ANALYSIS_reproduct.json --output-suffix _reproduct
-uv run --frozen python tools/analyze_population.py --analysis-suffix _reproduct --output results/reciprocity_population_visuals_20260924/population_summary_reproduct.json
-uv run --frozen python tools/figures/analyze_opponent_profiles.py --analysis-suffix _reproduct --output results/figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json
-uv run --frozen python tools/figures/plot_behavior_evidence.py --analysis-suffix _reproduct --output results/reciprocity_population_visuals_20260924/behavior/ANALYSIS_reproduct.json
-uv run --frozen python -m experiments.direct_reciprocity.mismatch_distance --root . --output-suffix _reproduct
-uv run --frozen python results/model_comparison_20260928/cross_model_summary.py --analysis-suffix _reproduct --output results/model_comparison_20260928/cross_model_mainline_data_reproduct.json --csv-dir results/model_comparison_20260928 --output-suffix _reproduct
-uv run --frozen python tools/judge_mismatch_detection_summary.py report --judgments-dir results/mismatch_detection_jev/judgments --threshold 0.40 --confidence 0.60 --output-json results/mismatch_detection_jev/jev_recount_reproduct.json --output-markdown results/mismatch_detection_jev/REPORT_reproduct.md
+uv run python -m experiments.direct_reciprocity.specificity_analysis results/feedback_specificity_v2 --output-suffix _reproduct
+uv run python thinking_control_analysis.py results/feedback_specificity_thinking_384k_20260923 --source results/feedback_specificity_v2 --source-analysis ANALYSIS_reproduct.json --output-suffix _reproduct
+uv run python results/qwen3_8/analyze.py --root results/qwen3_8 --source results/feedback_specificity_v2 --output-suffix _reproduct
+uv run python -m experiments.direct_reciprocity.role_analysis results/feedback_specificity_v2 --analysis-file ANALYSIS_reproduct.json --output-suffix _reproduct
+uv run python tools/analyze_population.py --analysis-suffix _reproduct --output results/reciprocity_population_visuals_20260924/population_summary_reproduct.json
+uv run python tools/figures/analyze_opponent_profiles.py --analysis-suffix _reproduct --output results/figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json
+uv run python tools/figures/plot_behavior_evidence.py --analysis-suffix _reproduct --output results/reciprocity_population_visuals_20260924/behavior/ANALYSIS_reproduct.json
+uv run python -m experiments.direct_reciprocity.mismatch_distance --root . --output-suffix _reproduct
+uv run python results/model_comparison_20260928/cross_model_summary.py --analysis-suffix _reproduct --output results/model_comparison_20260928/cross_model_mainline_data_reproduct.json --csv-dir results/model_comparison_20260928 --output-suffix _reproduct
+uv run python tools/judge_mismatch_detection_summary.py report --judgments-dir results/mismatch_detection_jev/judgments --threshold 0.40 --confidence 0.60 --output-json results/mismatch_detection_jev/jev_recount_reproduct.json --output-markdown results/mismatch_detection_jev/REPORT_reproduct.md
 ```
 
-| Analysis | Computational script | Inputs and recomputed summaries |
-| --- | --- | --- |
-| OFF matching, Raw/S1/S2/S3 and sensitivity checks | `experiments.direct_reciprocity.specificity_analysis` | OFF requests, sealed decisions and H -> `ANALYSIS_reproduct.json` and `AUDIT_reproduct.json` |
-| ON statistics and paired OFF/ON differences | `thinking_control_analysis.py` | OFF/ON H at shared parents -> ON `ANALYSIS_reproduct.json` |
-| Qwen comparisons | `results/qwen3_8/analyze.py` | Qwen requests and H -> per-mode and combined `ANALYSIS_reproduct.json` |
-| Fixed-pool N/G/U/B policies | `experiments.direct_reciprocity.role_analysis` | Selection scores and H from the same pools -> `role_analysis/ANALYSIS_reproduct.json` |
-| Candidate distributions and selection outcomes | `tools/analyze_population.py` | 480 DeepSeek OFF/ON candidates and S3 decisions -> `population_summary_reproduct.json` |
-| Opponent-family payoffs | `tools/figures/analyze_opponent_profiles.py` | Per-opponent H payoffs -> `figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json` |
-| Independent behavioural stages | `tools/figures/plot_behavior_evidence.py` | F′ and sealed S3 decisions -> `behavior/ANALYSIS_reproduct.json` |
-| Mismatch distances and sensitivity | `experiments.direct_reciprocity.mismatch_distance` | F reports for 240 initial strategies, 60 parent/donor pairs and candidate H -> distance files with `_reproduct` appended to their stems |
-| Cross-model summary | `results/model_comparison_20260928/cross_model_summary.py` | Four configurations and paired population vectors -> `cross_model_mainline_data_reproduct.json` |
-| Visible-reasoning label checks | `tools/judge_mismatch_detection_summary.py report` | 240 labels in `results/mismatch_detection_jev/judgments/` -> `results/mismatch_detection_jev/jev_recount_reproduct.json` |
+| Step / analysis | Inputs and outputs |
+| --- | --- |
+| 1. OFF matching, Raw/S1/S2/S3 and sensitivity | OFF requests, sealed decisions and holdout (H) -> `ANALYSIS_reproduct.json`, `AUDIT_reproduct.json` |
+| 2. ON statistics and paired OFF/ON differences | Shared-parent OFF/ON H -> ON `ANALYSIS_reproduct.json` |
+| 3. Qwen comparisons | Qwen requests and H -> per-mode and combined `ANALYSIS_reproduct.json` |
+| 4. Fixed-pool N/G/U/B policies | Selection scores and H -> `role_analysis/ANALYSIS_reproduct.json` |
+| 5. Candidate distributions and selection | DeepSeek OFF/ON candidates and S3 decisions -> `population_summary_reproduct.json` |
+| 6. Opponent-family payoffs | Per-opponent H -> `figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json` |
+| 7. Independent behavioural stages | F′ measurements and S3 decisions -> `behavior/ANALYSIS_reproduct.json` |
+| 8. Mismatch distances and sensitivity | F reports, parent/donor pairs and candidate H -> `docs/direct_reciprocity/mismatch_distance/` |
+| 9. Cross-model summary | Four configurations and paired population vectors -> CSV/JSON in `results/model_comparison_20260928/` |
+| 10. Visible-reasoning labels | Cached judgments -> JSON/report in `results/mismatch_detection_jev/` |
+
+Step 9 exports `cross_model_mainline_data_reproduct.json`, `candidate_gains_reproduct.csv` (candidate gains), `population_gains_reproduct.csv` (population gains) and `condition_statistics_reproduct.csv` (means and intervals). Step 10 exports `jev_recount_reproduct.json` and `REPORT_reproduct.md`.
 
 ## Reproduce the figures and tables
 
-`reproduct/` contains only human-viewable figures, with no subdirectories. Open the PNG links below to view them; PDF and SVG versions use the same filename stems. Plotting source code is in `tools/figures/`, and intermediate summaries stay beside the corresponding paper data.
-
-Generate the figures and tables from the `_reproduct` analysis files:
+Open the PNG links below; figure PDF/SVG versions share the same stems. `reproduct/` is a flat directory of viewable figures.
 
 ```sh
-uv run --frozen python tools/figures/plot_results_three_figures.py --analysis-suffix _reproduct --output-dir reproduct
-uv run --frozen python tools/figures/plot_camera_ready.py --analysis-suffix _reproduct --figures 3 4 5 --output-dir reproduct
-uv run --frozen python tools/figures/build_interface_figures.py --input results/reciprocity_population_visuals_20260924/population_summary_reproduct.json --display-output results/figure_rendering/frozen_generation_display_reproduct.json --output-dir reproduct
-uv run --frozen python tools/figures/plot_opponent_profiles.py --input results/figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json --output-dir reproduct
-uv run --frozen python tools/figures/plot_mismatch_distance.py --inputs docs/direct_reciprocity/mismatch_distance/mismatch_distance_thinking_off_reproduct.json docs/direct_reciprocity/mismatch_distance/mismatch_distance_thinking_on_reproduct.json --output-dir reproduct
-uv run --frozen python tools/export_paper_tables.py --work . --analysis-suffix _reproduct --output results/reproduction/tables --output-suffix _reproduct
+uv run python tools/figures/plot_results_three_figures.py --analysis-suffix _reproduct --output-dir reproduct
+uv run python tools/figures/plot_camera_ready.py --analysis-suffix _reproduct --figures 3 4 5 --output-dir reproduct
+uv run python tools/figures/build_interface_figures.py --input results/reciprocity_population_visuals_20260924/population_summary_reproduct.json --display-output results/figure_rendering/frozen_generation_display_reproduct.json --output-dir reproduct
+uv run python tools/figures/plot_opponent_profiles.py --input results/figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json --output-dir reproduct
+uv run python tools/figures/plot_mismatch_distance.py --inputs docs/direct_reciprocity/mismatch_distance/mismatch_distance_thinking_off_reproduct.json docs/direct_reciprocity/mismatch_distance/mismatch_distance_thinking_on_reproduct.json --output-dir reproduct
+uv run python tools/export_paper_tables.py --work . --analysis-suffix _reproduct --output results/reproduction/tables --output-suffix _reproduct
 ```
 
-| Paper item | Reproduction output | Script and data |
+| Paper item | Reproduction output | Command / evidence |
 | --- | --- | --- |
-| Figure 1 | [figure1.png](assets/figure1.png) · [PDF](assets/figure1.pdf) | Method schematic supplied as PDF/PNG, with editable source in `assets/figure1_editable.pptx` |
-| Figure 2 | [fig2.png](reproduct/fig2.png) · PDF/SVG | `plot_results_three_figures.py`; cross-model matching and paired population Raw/S3 gains |
-| Figure 3 | [fig3.png](reproduct/fig3.png) · PDF/SVG | Same script; opponent-family payoffs and independent behaviour |
-| Figure S1 | [figS1.png](reproduct/figS1.png) · PDF/SVG | `plot_camera_ready.py --figures 3`; both conditions, three selectors and OFF/ON |
-| Figure S2 | [figS2.png](reproduct/figS2.png) · PDF/SVG | `build_interface_figures.py`; 240 candidates and 120 pools per configuration; recomputed histograms and Gaussian KDE with Scott's bandwidth |
-| Figure S3 | [figS3.png](reproduct/figS3.png) · PDF/SVG | `plot_camera_ready.py --figures 5`; fixed-pool policies and decomposition |
-| Figure S4 | [figS4.png](reproduct/figS4.png) · PDF/SVG | `plot_opponent_profiles.py`; four opponent-family payoffs for Raw/S3 |
-| Figure S5 | [figS5.png](reproduct/figS5.png) · PDF/SVG | `plot_camera_ready.py --figures 4`; independent behavioural differences for OFF |
-| Figure S6 | [figS6.png](reproduct/figS6.png) · PDF/SVG | `plot_mismatch_distance.py`; shared parent-donor distances |
-| Table S1 | `tableS1_probe_parameters_reproduct.csv/.tex` | Fixed F′ probe parameters |
-| Table S2 | `tableS2_primary_reproduct.csv/.tex` | Prespecified Raw matching comparison |
-| Table S3 | `tableS3_sensitivity_reproduct.csv/.tex` | OFF noise and longer-match checks |
-| Table S4 | `tableS4_selection_reproduct.csv/.tex` | S3-minus-N noise and longer-match checks |
-| Table S5 | `tableS5_distance_reproduct.csv/.tex` | Matching differences after excluding closest donors |
+| Figure 1 | [figure1.png](assets/figure1.png) · [PDF](assets/figure1.pdf) | Method schematic; editable source in `assets/figure1_editable.pptx` |
+| Figure 2 | [fig2.png](reproduct/fig2.png) | 1; cross-model matching and paired population Raw/S3 gains |
+| Figure 3 | [fig3.png](reproduct/fig3.png) | 1; opponent-family payoffs and independent behaviour |
+| Figure S1 | [figS1.png](reproduct/figS1.png) | 2 (`--figures 3`); both conditions, three selectors and OFF/ON |
+| Figure S2 | [figS2.png](reproduct/figS2.png) | 3; candidate histograms and Gaussian KDE with Scott's bandwidth |
+| Figure S3 | [figS3.png](reproduct/figS3.png) | 2 (`--figures 5`); fixed-pool policies and decomposition |
+| Figure S4 | [figS4.png](reproduct/figS4.png) | 4; four opponent-family payoffs for Raw/S3 |
+| Figure S5 | [figS5.png](reproduct/figS5.png) | 2 (`--figures 4`); independent behavioural differences for OFF |
+| Figure S6 | [figS6.png](reproduct/figS6.png) | 5; shared parent-donor distances |
+| Table S1 | `tableS1_probe_parameters_reproduct.csv/.tex` | 6; fixed F′ probe parameters |
+| Table S2 | `tableS2_primary_reproduct.csv/.tex` | 6; prespecified Raw matching comparison |
+| Table S3 | `tableS3_sensitivity_reproduct.csv/.tex` | 6; OFF noise and longer-match checks |
+| Table S4 | `tableS4_selection_reproduct.csv/.tex` | 6; S3-minus-N noise and longer-match checks |
+| Table S5 | `tableS5_distance_reproduct.csv/.tex` | 6; matching differences after excluding closest donors |
 
-Both manuscripts use Figures 1–3 and Tables I–II in the main text, and Figures S1–S6 and Tables S1–S5 in the appendices. `tools/export_paper_tables.py` writes the supplementary tables to `results/reproduction/tables/`. Main Tables I and II define the report conditions and S1/S2/S3 scoring, respectively; both contain fixed protocol definitions and require no API calls.
-
-CSV exports are in `results/model_comparison_20260928/`: `candidate_gains_reproduct.csv` contains candidate gains, `population_gains_reproduct.csv` contains population-level gains, and `condition_statistics_reproduct.csv` contains means and intervals. Cached reasoning-label summaries are written to `results/mismatch_detection_jev/jev_recount_reproduct.json`.
+Command numbers refer to the block above. Main Tables I–II define the report conditions and S1/S2/S3 scoring; they contain fixed protocol definitions.
 
 ## Optional new API generation
 
-The reproduction above uses recorded responses and requires no API credentials. For a small new API run, copy `.env.example` to `.env` and configure the DeepSeek key. Reuse population s200 and its rank-1 parent without copying the initialization records:
+Copy `.env.example` to `.env` and configure the DeepSeek key. The following workflow reuses population s200 and its rank-1 parent, makes four candidate calls (two Accurate, two Mismatched), then runs the analyses and renders the figures/tables:
 
 ```sh
-uv run --frozen python -m experiments.direct_reciprocity.specificity freeze --output results/api_smoke_reproduct --source results/feedback_specificity_v2 --seeds 200 --ranks 1
-uv run --frozen python -m experiments.direct_reciprocity.specificity all --output results/api_smoke_reproduct --workers 4 --api-workers 1 --env-file .env
-uv run --frozen python -m experiments.direct_reciprocity.specificity_analysis results/api_smoke_reproduct --output-suffix _reproduct
+uv run python -m experiments.direct_reciprocity.specificity freeze --output results/api_smoke_reproduct --source results/feedback_specificity_v2 --seeds 200 --ranks 1
+uv run python -m experiments.direct_reciprocity.specificity all --output results/api_smoke_reproduct --workers 4 --api-workers 1 --env-file .env
+uv run python -m experiments.direct_reciprocity.specificity_analysis results/api_smoke_reproduct --output-suffix _reproduct
+uv run python -m experiments.direct_reciprocity.role_analysis results/api_smoke_reproduct --analysis-file ANALYSIS_reproduct.json --output-suffix _reproduct
+uv run python tools/analyze_population.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --output results/api_smoke_reproduct/population_summary_reproduct.json
+uv run python tools/figures/analyze_opponent_profiles.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --output results/api_smoke_reproduct/opponent_profiles_reproduct.json
+uv run python tools/figures/plot_behavior_evidence.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --output results/api_smoke_reproduct/behavior_reproduct.json
+uv run python -m experiments.direct_reciprocity.mismatch_distance --run-root results/api_smoke_reproduct --out-dir results/api_smoke_reproduct --output-suffix _reproduct
+uv run python tools/figures/plot_results_three_figures.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
+uv run python tools/figures/plot_camera_ready.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --figures 3 4 5 --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
+uv run python tools/figures/build_interface_figures.py --input results/api_smoke_reproduct/population_summary_reproduct.json --display-output results/api_smoke_reproduct/frozen_generation_display_reproduct.json --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
+uv run python tools/figures/plot_opponent_profiles.py --input results/api_smoke_reproduct/opponent_profiles_reproduct.json --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
+uv run python tools/figures/plot_mismatch_distance.py --inputs results/api_smoke_reproduct/mismatch_distance_thinking_off_reproduct.json --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
+uv run python tools/export_paper_tables.py --work . --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --distance-input results/api_smoke_reproduct/mismatch_distance_thinking_off_reproduct.json --output results/api_smoke_reproduct --output-suffix _reproduct --figure-dir results/reproduction
 ```
 
-This run makes four candidate calls: two Accurate and two Mismatched. The same generation, selection, payoff evaluation and analysis code writes the new records and `ANALYSIS_reproduct.json` to `results/api_smoke_reproduct/`. Re-running a completed directory uses its recorded responses; choose a new output directory for additional API samples. A single population demonstrates the API-to-analysis workflow; recover the paper's statistics from the recorded-data commands above. New API outputs need not match the original generated programs.
-
-Continue through the downstream analyses and render the small-run figures and tables with the same entry points:
-
-```sh
-uv run --frozen python -m experiments.direct_reciprocity.role_analysis results/api_smoke_reproduct --analysis-file ANALYSIS_reproduct.json --output-suffix _reproduct
-uv run --frozen python tools/analyze_population.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --output results/api_smoke_reproduct/population_summary_reproduct.json
-uv run --frozen python tools/figures/analyze_opponent_profiles.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --output results/api_smoke_reproduct/opponent_profiles_reproduct.json
-uv run --frozen python tools/figures/plot_behavior_evidence.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --output results/api_smoke_reproduct/behavior_reproduct.json
-uv run --frozen python -m experiments.direct_reciprocity.mismatch_distance --run-root results/api_smoke_reproduct --out-dir results/api_smoke_reproduct --output-suffix _reproduct
-uv run --frozen python tools/figures/plot_results_three_figures.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
-uv run --frozen python tools/figures/plot_camera_ready.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --figures 3 4 5 --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
-uv run --frozen python tools/figures/build_interface_figures.py --input results/api_smoke_reproduct/population_summary_reproduct.json --display-output results/api_smoke_reproduct/frozen_generation_display_reproduct.json --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
-uv run --frozen python tools/figures/plot_opponent_profiles.py --input results/api_smoke_reproduct/opponent_profiles_reproduct.json --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
-uv run --frozen python tools/figures/plot_mismatch_distance.py --inputs results/api_smoke_reproduct/mismatch_distance_thinking_off_reproduct.json --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
-uv run --frozen python tools/export_paper_tables.py --work . --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --distance-input results/api_smoke_reproduct/mismatch_distance_thinking_off_reproduct.json --output results/api_smoke_reproduct --output-suffix _reproduct --figure-dir results/reproduction
-```
-
-The small run uses the paper's record and summary structures with one population, one parent and four candidates. It displays the DeepSeek OFF configuration in Figures [2](results/reproduction/fig2.png), [3](results/reproduction/fig3.png), and S1–S6, directly in `results/reproduction/` as PNG/PDF/SVG files. Tables I–II and S1–S5 are also viewable there as PNG/PDF files; CSV/TeX exports and numerical intermediates stay in `results/api_smoke_reproduct/`. Figure 1 is the shared method diagram in `assets/`. With one population, bootstrap intervals collapse to the observed means; Table S5 marks the distance sensitivity estimate as unavailable when there are too few parents.
+New records and summaries use the paper's data structures; generated values may differ. Data and CSV/TeX exports stay in `results/api_smoke_reproduct/`. Small-run Figures [2](results/reproduction/fig2.png), [3](results/reproduction/fig3.png) and S1–S6 (PNG/PDF/SVG), and Tables I–II and S1–S5 (PNG/PDF), are written directly to `results/reproduction/`. With one population, bootstrap intervals collapse to the means; Table S5 reports insufficient parents. Completed runs reuse cached responses; choose a new output directory for additional API samples.
 
 For a complete new experiment, omit `--source`, `--seeds` and `--ranks` at the freeze stage and use a separate output directory. Defaults make 240 initialization calls and 240 candidate calls. ON/Qwen generators accept `--source` pointing to a completed new OFF experiment and require distinct output directories.
