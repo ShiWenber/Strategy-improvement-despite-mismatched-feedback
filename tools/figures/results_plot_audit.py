@@ -59,8 +59,8 @@ def validate_panel_layout(fig,stem):
     titles=[ax.get_title(loc='left') for ax in fig.axes]
     assert all(re.fullmatch(r'\([a-z]\)',t) for t in titles),(stem,titles)
     assert titles==[f'({chr(97+i)})' for i in range(len(titles))]
-    expected={'figS1':(3,6),'figS2':(3,),'figS3':(2,),'figS4':(2,4),'figS5':(4,),'figS6':(2,)}
-    assert len(legends) in expected[stem]
+    expected={'figS1':6,'figS2':3,'figS3':2,'figS4':4,'figS5':4,'figS6':2}
+    assert len(legends)==expected[stem]
     return {'minimum_font_pt':min(fonts),'maximum_font_pt':max(fonts),'out_of_canvas_text':outside,'legends':legends,'panel_titles':titles,'figure_legend_count':0,'legend_position':'one independent legend in the upper part of each lettered panel'}
 
 def render_audit(fig,stem,inputs,script,legend_labels,notes=None, *, output_dir=None, audit_dir=None):

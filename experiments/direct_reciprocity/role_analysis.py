@@ -110,7 +110,7 @@ def run(root, analysis_file="ANALYSIS.json", output_suffix=""):
     plan = Path('docs/direct_reciprocity/ROLE_ANALYSIS_PLAN.md')
     result = dict(status='complete', design='post_hoc_fixed_pool_exact_expectations',
                   note='Exploratory unadjusted population-bootstrap intervals. No new model requests or games.',
-                  bootstrap_seed=20260920, bootstrap_replicates=20000, independent_clusters=len(seeds),
+                  bootstrap_seed=20260920, bootstrap_replicates=20000, independent_clusters=20,
                   counts=dict(counts), summaries=summaries, rows=records, input_sha256=hashes,
                   plan_sha256=hashlib.sha256(plan.read_bytes()).hexdigest(),
                   verification=dict(policy_edge_cases='passed', sealed_decisions_reconstructed=len(sealed),
@@ -127,7 +127,7 @@ def run(root, analysis_file="ANALYSIS.json", output_suffix=""):
               '| 组别/规则/设置 | B−R | G−R | U−G | B−U |', '| --- | --- | --- | --- | --- |']
     for key, row in summaries.items():
         lines.append('| ' + key + ' | ' + ' | '.join(f"{row[m]['mean']:+.6f} [{row[m]['ci95'][0]:+.6f}, {row[m]['ci95'][1]:+.6f}]" for m in ('total', 'gate', 'opportunity', 'ranking')) + ' |')
-    lines += ['', '## 候选与候选池', '', '| 组别 | 改善 | 退化 | 持平 | 至少一个改善的池 | 两个改善的池 |', '| --- | ---: | ---: | ---: | ---: | ---: |']
+    lines += ['', '## 候选与候选池', '', '| 组别 | 改善 | 退化 | 持平 | 至少一个改善/60 | 两个改善/60 |', '| --- | ---: | ---: | ---: | ---: | ---: |']
     for arm, c in counts.items():
         lines.append(f"| {arm} | {c['better']} | {c['worse']} | {c['equal']} | {c['pools_with_better']} | {c['both_better']} |")
     lines += ['', '该分解依赖指定路径，不能把其比例解释为模型与评价器的一般因果贡献。全部区间为事后探索性结果。', '']

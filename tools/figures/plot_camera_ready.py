@@ -100,14 +100,13 @@ def condition_legend(ax):
     return panel_legend(ax, handles, list(LABELS), ncol=1)
 
 
-def make_figure3(data, thinking=None):
+def make_figure3(data, thinking):
     """Stored selector means and intervals; six parallel descriptive panels."""
     apply_style()
-    configurations = [('Thinking OFF', data)] + ([('Thinking ON', thinking)] if thinking else [])
-    fig, axes = plt.subplots(len(configurations), 3, figsize=(WIDTHS[3], 2.7 * len(configurations)), layout='constrained', squeeze=False)
+    fig, axes = plt.subplots(2, 3, figsize=(WIDTHS[3], 5.10), layout='constrained')
     fig.get_layout_engine().set(rect=(0, 0, 1, 1), w_pad=.035, h_pad=.065,
                                 wspace=.07, hspace=.14)
-    for row, (mode, values) in enumerate(configurations):
+    for row, (mode, values) in enumerate((('Thinking OFF', data), ('Thinking ON', thinking))):
         for column, (rule, title) in enumerate(zip(
                 ('S1', 'S2', 'S3'),
                 ('S1: training (5)', 'S2: training (20)', 'S3: validation (20)'))):
@@ -206,7 +205,6 @@ def main():
     parser.add_argument('--figures', nargs='+', type=int, choices=(3, 4, 5), default=[3, 4, 5])
     parser.add_argument('--work', type=Path, default=REPO)
     parser.add_argument('--analysis-suffix', default='')
-    parser.add_argument('--run-root', type=Path, help='Render one OFF experiment.')
     parser.add_argument('--output-dir', type=Path)
     parser.add_argument('--audit-dir', type=Path)
     args = parser.parse_args()
@@ -216,22 +214,20 @@ def main():
     audit_dir = args.audit_dir or work / 'results/reproduction'
     audit_dir.mkdir(parents=True, exist_ok=True)
     name = f'ANALYSIS{args.analysis_suffix}.json'
-    source = args.run_root.resolve() if args.run_root else work / 'results/feedback_specificity_v2'
-    data_path = source / name
-    role_path = source / 'role_analysis' / name
-    thinking_path = None if args.run_root else work / 'results/feedback_specificity_thinking_384k_20260923' / name
-    INPUTS = [data_path, role_path] + ([thinking_path] if thinking_path else [])
+    data_path = work / 'results/feedback_specificity_v2' / name
+    role_path = work / 'results/feedback_specificity_v2/role_analysis' / name
+    thinking_path = work / 'results/feedback_specificity_thinking_384k_20260923' / name
+    INPUTS = [data_path, role_path, thinking_path]
     AUDIT_DIR = audit_dir
-    data, role = [json.loads(p.read_text(encoding='utf-8')) for p in (data_path, role_path)]
-    thinking = json.loads(thinking_path.read_text(encoding='utf-8'))['thinking'] if thinking_path else None
+    data, role, thinking_report = [json.loads(p.read_text(encoding='utf-8')) for p in (data_path, role_path, thinking_path)]
     assert not data['audit']['issues']
-    makers = {3: lambda: make_figure3(data, thinking),
+    makers = {3: lambda: make_figure3(data, thinking_report['thinking']),
               4: lambda: make_figure4(data), 5: lambda: make_figure5(role)}
     for index in args.figures:
         makers[index]()
     provenance = {
         'input_sha256': {str(p.relative_to(work)): sha256(p.read_bytes()).hexdigest()
-                         for p in INPUTS},
+                         for p in (data_path, role_path, thinking_path)},
         'script_sha256': sha256(Path(__file__).read_bytes()).hexdigest(),
         'textwidth_inches': TEXTWIDTH, 'figures': audits,
         'data_changes': False, 'new_analysis': False, 'new_model_calls': 0, 'new_games': 0,

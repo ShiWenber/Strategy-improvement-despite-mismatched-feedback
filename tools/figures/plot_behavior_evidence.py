@@ -55,13 +55,12 @@ def summarize(v):
 
 def analyze(config, root, analysis_suffix=""):
     manifest = read(root / 'manifest.json')
-    seeds = sorted(manifest['seeds'])
     seal = read(root / 'SELECTIONS_SEALED.json')
     frozen = read(root / f'ANALYSIS{analysis_suffix}.json')
     expected = frozen['thinking'] if config == 'thinking' else frozen
     selection = {(r['context'], r['arm']): r for r in seal['rows'] if r['rule'] == 'S3'}
+    assert len(selection) == 120
     parent_ids = sorted({j['context'] for j in manifest['jobs']})
-    assert len(selection) == len(parent_ids) * len(ARMS)
     parents = {cid: read(root / 'holdout' / f'{cid}.json') for cid in parent_ids}
     children = {j['id']: read(root / 'holdout' / (j['id'] + '.json')) for j in manifest['jobs']}
     jobs = defaultdict(list)
@@ -99,7 +98,7 @@ def analyze(config, root, analysis_suffix=""):
             for metric in METRICS:
                 key = f'{mode}/{arm}/{metric}'
                 ss = {stage: summarize([mean(r['behavior'][mode][stage][metric] for r in subset if r['seed'] == s)
-                                      for s in seeds]) for stage in STAGES}
+                                      for s in SEEDS]) for stage in STAGES}
                 for a, b in (('raw', 'parent'), ('S3', 'parent'), ('S3', 'raw')):
                     ss[f'{a}_minus_{b}'] = summarize(np.asarray(ss[a]['seed_values']) - ss[b]['seed_values'])
                 summaries[key] = ss
@@ -115,7 +114,7 @@ def analyze(config, root, analysis_suffix=""):
         subset = [r for r in pool_rows if r['arm'] == arm]
         for stage, ref in [('raw', expected['raw'][arm]['metrics']['default/score']),
                            ('S3', expected['selected']['S3/' + arm]['metrics']['default'])]:
-            values = [mean(r['H_score'][stage] - r['H_score']['parent'] for r in subset if r['seed'] == s) for s in seeds]
+            values = [mean(r['H_score'][stage] - r['H_score']['parent'] for r in subset if r['seed'] == s) for s in SEEDS]
             assert np.allclose(values, ref['seed_values'], atol=1e-12, rtol=0), (config, arm, stage)
         for mode in ('controlled', 'natural'):
             for metric, oldmetric in [('defection_exposure', 'sustained_unilateral_cooperation_last5'),
@@ -126,7 +125,7 @@ def analyze(config, root, analysis_suffix=""):
                 ref = expected['raw'][arm]['behavior'][mode + '/' + oldmetric]['seed_values']
                 assert np.allclose(values, ref, atol=1e-12, rtol=0), (config, arm, mode, metric)
     return {'summaries': summaries, 'matched_contrasts': contrasts, 'pool_rows': pool_rows,
-            'n_seeds': len(seeds), 'n_parents': len(parents), 'n_slots': len(children),
+            'n_seeds': len(SEEDS), 'n_parents': len(parents), 'n_slots': len(children),
             'S3_accepted': sum(r['winner'] is not None for r in pool_rows),
             'behavior_fallbacks': sum(c['fallback']['behavior'] for c in children.values()),
             'validation': 'All raw behaviour and raw/S3 payoff seed means match released results.'}
@@ -137,25 +136,21 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--work', type=Path, default=REPO)
     parser.add_argument('--analysis-suffix', default='')
-    parser.add_argument('--run-root', type=Path, help='Analyze one OFF experiment.')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     REPO = args.work.resolve()
     output = args.output or REPO / 'results/reciprocity_population_visuals_20260924/behavior/ANALYSIS.json'
     output.parent.mkdir(parents=True, exist_ok=True)
-    roots = {'non_thinking': args.run_root.resolve()} if args.run_root else {config: REPO / root for config, root in ROOTS.items()}
-    manifest = read(next(iter(roots.values())) / 'manifest.json')
-    data = {config: analyze(config, root, args.analysis_suffix) for config, root in roots.items()}
-    if 'thinking' in data:
-        for mode in ('controlled', 'natural'):
-            for metric in METRICS:
-                key = f'{mode}/pooled/{metric}'
-                assert data['non_thinking']['summaries'][key]['parent'] == data['thinking']['summaries'][key]['parent']
+    data = {config: analyze(config, REPO / root, args.analysis_suffix) for config, root in ROOTS.items()}
+    for mode in ('controlled', 'natural'):
+        for metric in METRICS:
+            key = f'{mode}/pooled/{metric}'
+            assert data['non_thinking']['summaries'][key]['parent'] == data['thinking']['summaries'][key]['parent']
     report = {'status': 'complete', 'analysis_status': 'post_hoc_exploratory',
-              'seeds': sorted(manifest['seeds']), 'independent_units': len(manifest['seeds']), 'arms': list(ARMS),
-              'stage_definition': {'parent': f"{len(manifest['ranks'])} shared parents per population",
-                                   'raw': f"{len(manifest['ranks']) * len(ARMS) * manifest['draws']} candidates per population across 2 report conditions",
-                                   'S3': f"{len(manifest['ranks']) * len(ARMS)} sealed candidate-pool decisions per population"},
+              'seeds': SEEDS, 'independent_units': 20, 'arms': list(ARMS),
+              'stage_definition': {'parent': '3 shared parents per population',
+                                   'raw': '12 candidates per population across 2 report conditions',
+                                   'S3': '6 sealed candidate-pool decisions per population'},
               'no_new_games_or_model_calls': True,
               'configs': data, 'input_sha256': INPUT_HASHES,
               'analysis_script_sha256': sha256(Path(__file__).read_bytes()).hexdigest()}
