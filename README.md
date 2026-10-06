@@ -116,25 +116,14 @@ Command numbers refer to the block above. Main Tables I–II define the report c
 
 ## Optional new API generation
 
-Copy `.env.example` to `.env` and configure the DeepSeek key. The following workflow reuses population s200 and its rank-1 parent, makes four candidate calls (two Accurate, two Mismatched), then runs the analyses and renders the figures/tables:
+Copy `.env.example` to `.env` and configure the DeepSeek key. The following workflow reuses population s200 and its rank-1 parent, makes four candidate calls (two Accurate, two Mismatched), then writes the analysis summary:
 
 ```sh
 uv run python -m experiments.direct_reciprocity.specificity freeze --output results/api_smoke_reproduct --source results/feedback_specificity_v2 --seeds 200 --ranks 1
 uv run python -m experiments.direct_reciprocity.specificity all --output results/api_smoke_reproduct --workers 4 --api-workers 1 --env-file .env
 uv run python -m experiments.direct_reciprocity.specificity_analysis results/api_smoke_reproduct --output-suffix _reproduct
-uv run python -m experiments.direct_reciprocity.role_analysis results/api_smoke_reproduct --analysis-file ANALYSIS_reproduct.json --output-suffix _reproduct
-uv run python tools/analyze_population.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --output results/api_smoke_reproduct/population_summary_reproduct.json
-uv run python tools/figures/analyze_opponent_profiles.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --output results/api_smoke_reproduct/opponent_profiles_reproduct.json
-uv run python tools/figures/plot_behavior_evidence.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --output results/api_smoke_reproduct/behavior_reproduct.json
-uv run python -m experiments.direct_reciprocity.mismatch_distance --run-root results/api_smoke_reproduct --out-dir results/api_smoke_reproduct --output-suffix _reproduct
-uv run python tools/figures/plot_results_three_figures.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
-uv run python tools/figures/plot_camera_ready.py --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --figures 3 4 5 --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
-uv run python tools/figures/build_interface_figures.py --input results/api_smoke_reproduct/population_summary_reproduct.json --display-output results/api_smoke_reproduct/frozen_generation_display_reproduct.json --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
-uv run python tools/figures/plot_opponent_profiles.py --input results/api_smoke_reproduct/opponent_profiles_reproduct.json --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
-uv run python tools/figures/plot_mismatch_distance.py --inputs results/api_smoke_reproduct/mismatch_distance_thinking_off_reproduct.json --output-dir results/reproduction --audit-dir results/api_smoke_reproduct
-uv run python tools/export_paper_tables.py --work . --run-root results/api_smoke_reproduct --analysis-suffix _reproduct --distance-input results/api_smoke_reproduct/mismatch_distance_thinking_off_reproduct.json --output results/api_smoke_reproduct --output-suffix _reproduct --figure-dir results/reproduction
 ```
 
-New records and summaries use the paper's data structures; generated values may differ. Data and CSV/TeX exports stay in `results/api_smoke_reproduct/`. Small-run Figures [2](results/reproduction/fig2.png), [3](results/reproduction/fig3.png) and S1–S6 (PNG/PDF/SVG), and Tables I–II and S1–S5 (PNG/PDF), are written directly to `results/reproduction/`. With one population, bootstrap intervals collapse to the means; Table S5 reports insufficient parents. Completed runs reuse cached responses; choose a new output directory for additional API samples.
+New records and summaries use the paper's data structures; generated values may differ. Data and CSV/TeX exports stay in `results/api_smoke_reproduct/`. Small-run Figures [2](results/reproduction/fig2.png), [3](results/reproduction/fig3.png) and S1–S6 (PNG/PDF/SVG), and Tables I–II and S1–S5 (PNG/PDF), are available in `results/reproduction/`. With one population, bootstrap intervals collapse to the means; Table S5 reports insufficient parents. Completed runs reuse cached responses; choose a new output directory for additional API samples.
 
 For a complete new experiment, omit `--source`, `--seeds` and `--ranks` at the freeze stage and use a separate output directory. Defaults make 240 initialization calls and 240 candidate calls. ON/Qwen generators accept `--source` pointing to a completed new OFF experiment and require distinct output directories.

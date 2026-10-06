@@ -96,9 +96,7 @@ def load_regime(root):
     root = Path(root)
     manifest = read_json(root / 'manifest.json')
     seeds = [int(s) for s in manifest.get('seeds', [])]
-    from .specificity import population_root
-    source = population_root(root, manifest)
-    populations = {seed: read_json(source / 'populations' / f's{seed}.json') for seed in seeds}
+    populations = {seed: read_json(root / 'populations' / f's{seed}.json') for seed in seeds}
     contexts = {}
     for seed in seeds:
         for rank in manifest.get('ranks', (1, 3, 6)):
@@ -173,7 +171,7 @@ def build_distances(regime):
         })
     diagnostics = {'feature_names': names, 'n_features': len(names), 'blocks': blocks,
                    'zscore_reference': {'mean': mu.tolist(), 'sd': sd.tolist(),
-                                        'note': f"z-scored over {len(index)} population members of {len(regime['seeds'])} populations"},
+                                        'note': 'z-scored over all 240 population members of the 20 seeds'},
                    'null_within_population_ordered_pairs': {
                        'n': len(null_full), 'mean': float(np.mean(null_full)), 'median': float(np.median(null_full)),
                        'q10': float(np.quantile(null_full, .10)), 'q90': float(np.quantile(null_full, .90))},
@@ -428,7 +426,7 @@ def _mean_ci(values, seeds, n=20000, seed=2026093003):
 
 def summarize_distances(rows, key='delta_full'):
     values = np.array([r[key] for r in rows], float)
-    return {'n': len(values), 'mean': float(values.mean()), 'sd': float(values.std(ddof=1)) if len(values) > 1 else None,
+    return {'n': len(values), 'mean': float(values.mean()), 'sd': float(values.std(ddof=1)),
             'min': float(values.min()), 'q25': float(np.quantile(values, .25)),
             'median': float(np.median(values)), 'q75': float(np.quantile(values, .75)),
             'max': float(values.max())}
@@ -535,7 +533,7 @@ def analyze_regime(name, root, output_dir, output_suffix=""):
         'distance_by_parent_rank': by_rank,
         'rows': rows,
         'note': ('Diagnostics are measured before candidate generation, so distance is a pre-treatment '
-                 f"covariate. Associations are exploratory and use {len(regime['seeds'])} population clusters. Sign of tau_raw is "
+                 'covariate. Associations are exploratory and use 20 population clusters. Sign of tau_raw is '
                  'Accurate minus Mismatched; positive means accurate diagnosis produced the better raw candidate.'),
     }
     write_json(Path(output_dir) / f'mismatch_distance_{name}{output_suffix}.json', payload)
@@ -834,15 +832,10 @@ def main():
     parser.add_argument('--docs', default='docs/direct_reciprocity')
     parser.add_argument('--out-dir', default=None)
     parser.add_argument('--output-suffix', default='')
-    parser.add_argument('--run-root', type=Path, help='Analyze one OFF experiment; write its distance JSON only.')
     args = parser.parse_args()
     base = Path(args.root).resolve()
     out_dir = Path(args.out_dir) if args.out_dir else base / args.docs / 'mismatch_distance'
     out_dir.mkdir(parents=True, exist_ok=True)
-    if args.run_root:
-        payload = analyze_regime('thinking_off', args.run_root, out_dir, args.output_suffix)
-        print(json.dumps({'regimes': [payload['regime']], 'json_dir': str(out_dir)}))
-        return
     payloads = {}
     for name, relative in REGIMES.items():
         root = base / relative
