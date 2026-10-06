@@ -7,6 +7,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, wait, FIRST_COMPLETED
 from dataclasses import asdict, replace
 import json
+import os
 from pathlib import Path
 import random
 from statistics import mean
@@ -42,22 +43,42 @@ def check_manifest(root):
     manifest = read_json(Path(root) / 'manifest.json')
     if manifest['implementation_hash'] != source_hash():
         raise RuntimeError('Frozen v2 implementation changed; do not mix versions')
+    population_root(root, manifest)
     return manifest
 
 
-def freeze(root):
+def population_root(root, manifest=None):
+    """Read reused initialization in place, with frozen hashes and no copies."""
+    root = Path(root)
+    manifest = manifest or read_json(root / 'manifest.json')
+    if 'initial_source' not in manifest:
+        return root
+    source = (root / manifest['initial_source']).resolve()
+    for relative, expected in manifest['initial_source_hashes'].items():
+        if digest((source / relative).read_text(encoding='utf-8')) != expected:
+            raise RuntimeError('Reused initialization changed: ' + relative)
+    return source
+
+
+def freeze(root, seeds=None, ranks=None, source=None):
     root = Path(root)
     if (root / 'manifest.json').exists():
         return check_manifest(root)
+    seeds = tuple(seeds) if seeds is not None else SEEDS
+    ranks = tuple(ranks) if ranks is not None else RANKS
+    if not seeds or len(seeds) > 20 or len(set(seeds)) != len(seeds):
+        raise ValueError('Require 1 to 20 distinct population seeds')
+    if not ranks or len(set(ranks)) != len(ranks) or any(rank not in RANKS for rank in ranks):
+        raise ValueError('Parent ranks must be a distinct subset of 1, 3, 6')
     init_jobs = [{'id': f'init-s{seed}-slot{slot}', 'seed': seed, 'slot': slot}
-                 for seed in SEEDS for slot in range(12)]
+                 for seed in seeds for slot in range(12)]
     jobs, permutations = [], {}
-    for seed in SEEDS:
+    for seed in seeds:
         # One random arm-to-request-position permutation per independent cluster.
         order = list(ARMS)
         random.Random(seed_for('specificity-arm-assignment', seed)).shuffle(order)
         permutations[str(seed)] = order
-        for rank in RANKS:
+        for rank in ranks:
             for draw in range(2):
                 for position, arm in enumerate(order):
                     cid = f's{seed}-rank{rank}'
@@ -70,20 +91,33 @@ def freeze(root):
     random.Random(2026091902).shuffle(init_jobs)
     manifest = {'version': 'specificity-v2', 'implementation_hash': source_hash(),
                 'engine_hash': implementation_hash(), 'provider': 'deepseek', 'model': 'deepseek-flash',
-                'config': asdict(cfg_for(SEEDS[0])), 'seeds': list(SEEDS), 'arms': list(ARMS),
-                'ranks': list(RANKS), 'draws': 2, 'init_jobs': init_jobs, 'jobs': jobs,
+                'config': asdict(cfg_for(seeds[0])), 'seeds': list(seeds), 'arms': list(ARMS),
+                'ranks': list(ranks), 'draws': 2, 'init_jobs': init_jobs, 'jobs': jobs,
                 'arm_position_permutations': permutations, 'assets': assets_record(),
                 'primary': 'raw_H_default_gain_accurate_minus_mismatched',
-                'independent_unit': '20 new initial populations', 'delta': .05,
+                'independent_unit': f'{len(seeds)} population clusters', 'delta': .05,
                 'selection_repeats': {'S1': 5, 'S2': 20, 'S3': 20}, 'holdout_repeats': 20,
                 'training_selection_generation_namespace': 19001,
                 'fallback': 'invalid candidate/setting runtime failure retains parent; API failures remain missing',
                 'init_fallback': 'ALLD when generation invalid or feedback probe execution fails; no replacement calls',
-                'init_quality_pause_above_invalid': 24,
+                'init_quality_pause_above_invalid': len(init_jobs) // 10,
                 'requested_calls': {'initial': len(init_jobs), 'candidates': len(jobs), 'total': len(init_jobs) + len(jobs)},
                 'frozen_at': time.time(),
                 'inference': 'seed-cluster bootstrap CI; exact cluster sign swaps for arm contrasts under paired exchangeability; parent contrast additionally assumes symmetric cluster effects',
                 'length_control': 'cl100k_base +/-5% for Accurate and Mismatched reports; not DeepSeek token equality'}
+    if source is not None:
+        source = Path(source).resolve()
+        origin = read_json(source / 'manifest.json')
+        if not set(seeds) <= set(origin['seeds']) or not set(ranks) <= set(origin['ranks']):
+            raise ValueError('Requested populations/parents are absent from the source')
+        if origin['arms'] != list(ARMS) or origin['draws'] != 2:
+            raise ValueError('Source report conditions or candidate budget differ')
+        files = ['manifest.json'] + [f'populations/s{seed}.json' for seed in seeds]
+        files += [f"{folder}/{job['id']}.json" for folder in ('initial', 'requests_initial') for job in init_jobs]
+        manifest['initial_source'] = Path(os.path.relpath(source, root.resolve())).as_posix()
+        manifest['initial_source_hashes'] = {relative: digest((source / relative).read_text(encoding='utf-8')) for relative in files}
+        manifest['requested_calls'] = {'initial': 0, 'candidates': len(jobs), 'total': len(jobs)}
+        manifest['independent_unit'] = f'{len(seeds)} reused population clusters; new candidate responses'
     write_json(root / 'manifest.json', manifest)
     return manifest
 
@@ -173,10 +207,11 @@ def make_prompts(root, manifest):
     root = Path(root)
     enc = tokenizer()
     contexts = {}
-    for seed in SEEDS:
-        data = read_json(root / 'populations' / f's{seed}.json')
+    populations = population_root(root, manifest)
+    for seed in manifest['seeds']:
+        data = read_json(populations / 'populations' / f's{seed}.json')
         pop = [Policy(**p) for p in data['population']]
-        for rank in RANKS:
+        for rank in manifest['ranks']:
             slot = data['selected_slots'][str(rank)]
             donor = data['mapping'][slot]
             correct = diagnostic_block(data['diagnostics'][slot])
@@ -286,7 +321,7 @@ def evaluation_job(arg):
     record = read_json(root / ('contexts' if kind == 'parent' else 'candidates') / (identity + '.json'))
     cid = identity if kind == 'parent' else record['context']
     c = read_json(root / 'contexts' / (cid + '.json'))
-    data = read_json(root / 'populations' / f"s{c['seed']}.json")
+    data = read_json(population_root(root) / 'populations' / f"s{c['seed']}.json")
     item = c['parent'] if kind == 'parent' else record['child']
     out = measured_selection(Policy(**item), [Policy(**p) for p in data['population']], c['slot'], cfg_for(c['seed'])) if item else {
         s: {'status': 'invalid'} for s in ('S1', 'S2', 'S3')}
@@ -308,8 +343,8 @@ def choose(parent, children, rule):
 def seal_selections(root, manifest, *, readonly=False):
     root = Path(root)
     rows = []
-    for seed in SEEDS:
-        for rank in RANKS:
+    for seed in manifest['seeds']:
+        for rank in manifest['ranks']:
             cid = f's{seed}-rank{rank}'
             parent = read_json(root / 'selection_scores' / (cid + '.json'))
             for arm in ARMS:
@@ -383,27 +418,37 @@ def main():
     parser.add_argument('--workers', type=int, default=12)
     parser.add_argument('--api-workers', type=int, default=8)
     parser.add_argument('--env-file', default='../../.env')
+    parser.add_argument('--seeds', nargs='+', type=int, help='Population seeds to freeze; defaults to the paper batch.')
+    parser.add_argument('--ranks', nargs='+', type=int, choices=RANKS, help='Parent ranks to freeze; defaults to 1, 3, 6.')
+    parser.add_argument('--source', type=Path, help='Reuse recorded initial populations in place; only candidate generation calls the API.')
     args = parser.parse_args()
     if min(args.workers, args.api_workers) < 1:
         parser.error('Worker counts must be positive')
     root = Path(args.output)
     root.mkdir(parents=True, exist_ok=True)
     if args.stage == 'freeze':
-        print(json.dumps({'frozen': freeze(root)['implementation_hash'], 'requests': 480}))
+        manifest = freeze(root, args.seeds, args.ranks, args.source)
+        print(json.dumps({'frozen': manifest['implementation_hash'], 'requests': manifest['requested_calls']['total']}))
         return
+    if args.seeds is not None or args.ranks is not None or args.source is not None:
+        parser.error('--seeds, --ranks and --source belong to the freeze stage')
     manifest = check_manifest(root)
     from dotenv import load_dotenv
     load_dotenv(args.env_file, override=False)
     phases = ['initialize', 'prepare', 'generate', 'select', 'holdout'] if args.stage == 'all' else [args.stage]
     for phase in phases:
         check_manifest(root)
-        if phase == 'initialize':
+        if phase == 'initialize' and 'initial_source' in manifest:
+            print(json.dumps({'stage': phase, 'reused_initial_requests': len(manifest['init_jobs']), 'new_api_calls': 0}), flush=True)
+        elif phase == 'initialize':
             pool_run(initial_job, [(str(root), job) for job in manifest['init_jobs']], args.api_workers, root, phase)
         elif phase == 'prepare':
-            initial = [read_json(root / 'initial' / (j['id'] + '.json')) for j in manifest['init_jobs']]
+            populations = population_root(root, manifest)
+            initial = [read_json(populations / 'initial' / (j['id'] + '.json')) for j in manifest['init_jobs']]
             if sum(r['fallback'] is not None for r in initial) > manifest['init_quality_pause_above_invalid']:
                 raise RuntimeError('Initialization fallback exceeds 10%; pause entire batch for audit')
-            pool_run(prepare_seed, [(str(root), seed) for seed in SEEDS], args.workers, root, phase, True)
+            if 'initial_source' not in manifest:
+                pool_run(prepare_seed, [(str(root), seed) for seed in manifest['seeds']], args.workers, root, phase, True)
             make_prompts(root, manifest)
         elif phase == 'generate':
             seal = make_prompts(root, manifest)
@@ -413,7 +458,7 @@ def main():
         elif phase == 'select':
             for job in manifest['jobs']:
                 read_json(root / 'candidates' / (job['id'] + '.json'))
-            identities = [('parent', f's{seed}-rank{rank}') for seed in SEEDS for rank in RANKS]
+            identities = [('parent', f's{seed}-rank{rank}') for seed in manifest['seeds'] for rank in manifest['ranks']]
             identities += [('child', job['id']) for job in manifest['jobs']]
             pool_run(evaluation_job, [(str(root), kind, identity) for kind, identity in identities], args.workers, root, phase, True)
             seal_selections(root, manifest)
@@ -421,10 +466,10 @@ def main():
             seal_selections(root, manifest)
             selections = root / 'SELECTIONS_SEALED.json'
             write_json(root / 'H_RELEASED.json', {'selection_digest': digest(selections.read_text(encoding='utf-8')), 'released_at': time.time()})
-            pool_run(holdout_job, [(str(root), 'parent', f's{seed}-rank{rank}') for seed in SEEDS for rank in RANKS], args.workers, root, 'holdout_parents', True)
+            pool_run(holdout_job, [(str(root), 'parent', f's{seed}-rank{rank}') for seed in manifest['seeds'] for rank in manifest['ranks']], args.workers, root, 'holdout_parents', True)
             pool_run(holdout_job, [(str(root), 'child', job['id']) for job in manifest['jobs']], args.workers, root, 'holdout_children', True)
             write_json(root / 'COMPLETE.json', {'implementation_hash': source_hash(), 'completed_at': time.time(),
-                                               'initial': len(manifest['init_jobs']), 'candidates': len(manifest['jobs']), 'contexts': len(SEEDS) * len(RANKS)})
+                                               'initial': len(manifest['init_jobs']), 'candidates': len(manifest['jobs']), 'contexts': len(manifest['seeds']) * len(manifest['ranks'])})
 
 
 if __name__ == '__main__':
