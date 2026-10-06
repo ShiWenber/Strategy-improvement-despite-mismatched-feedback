@@ -117,14 +117,14 @@ def test_paper_inputs_keep_their_recorded_hashes(record_property):
 def test_recomputed_csv_matches_full_precision_reference(name, rows, digest):
     import csv
     from hashlib import sha256
-    path = ROOT / 'reproduct' / (name + '_reproduct.csv')
+    path = ROOT / 'results/model_comparison_20260928' / (name + '_reproduct.csv')
     assert sha256(path.read_bytes()).hexdigest() == digest
     with path.open(encoding='utf-8', newline='') as handle:
         assert sum(1 for _ in csv.DictReader(handle)) == rows
 
 
 def test_cached_label_report_matches_paper_counts():
-    report = read(ROOT / 'reproduct/jev_recount_reproduct.json')
+    report = read(ROOT / 'results/mismatch_detection_jev/jev_recount_reproduct.json')
     assert report['threshold'] == .4 and report['confidence_gate'] == .6
     assert report['files_judged'] == 240
     assert all(report['by_arm'][arm]['files'] == 120 for arm in ('accurate', 'mismatched'))
@@ -135,7 +135,7 @@ def test_cached_label_report_matches_paper_counts():
 
 
 def test_sampled_replay_matches_recorded_games():
-    report = read(ROOT / 'reproduct/replay_reproduct.json')
+    report = read(ROOT / 'results/reproduction/replay_reproduct.json')
     assert report['games_replayed'] == 2640 and len(report['records']) == 12
     assert report['max_abs_error'] <= 1e-12 and report['live_api_calls'] == 0
     assert all(r['status'] in ('ok', 'invalid_candidate_no_game_replay') for r in report['records'])
