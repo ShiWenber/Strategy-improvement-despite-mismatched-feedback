@@ -122,11 +122,14 @@ CSV exports are in `results/model_comparison_20260928/`: `candidate_gains_reprod
 
 ## Optional new API generation
 
-The reproduction above uses the recorded responses and requires no API credentials. To generate a new batch, copy `.env.example` to `.env`, configure the relevant API keys, and use a separate output directory:
+The reproduction above uses recorded responses and requires no API credentials. For a small new API run, copy `.env.example` to `.env` and configure the DeepSeek key. Reuse population s200 and its rank-1 parent without copying the initialization records:
 
 ```sh
-uv run --frozen python -m experiments.direct_reciprocity.specificity freeze --output results/new_mainline_reproduct
-uv run --frozen python -m experiments.direct_reciprocity.specificity all --output results/new_mainline_reproduct --env-file .env
+uv run --frozen python -m experiments.direct_reciprocity.specificity freeze --output results/api_smoke_20261006_reproduct --source results/feedback_specificity_v2 --seeds 200 --ranks 1
+uv run --frozen python -m experiments.direct_reciprocity.specificity all --output results/api_smoke_20261006_reproduct --workers 4 --api-workers 1 --env-file .env
+uv run --frozen python -m experiments.direct_reciprocity.specificity_analysis results/api_smoke_20261006_reproduct --output-suffix _reproduct
 ```
 
-This optional batch makes 240 initialization calls and 240 candidate calls; it is not required to reproduce the paper. New API samples may differ from the recorded responses. ON/Qwen generators accept `--source` pointing to a completed new OFF experiment and require distinct output directories.
+This run makes four candidate calls: two Accurate and two Mismatched. The same generation, selection, payoff evaluation and analysis code writes the new records and `ANALYSIS_reproduct.json` to `results/api_smoke_20261006_reproduct/`. Re-running a completed directory uses its recorded responses; choose a new output directory for additional API samples. A single population demonstrates the API-to-analysis workflow; recover the paper's statistics from the recorded-data commands above. New API outputs need not match the original generated programs.
+
+For a complete new experiment, omit `--source`, `--seeds` and `--ranks` at the freeze stage and use a separate output directory. Defaults make 240 initialization calls and 240 candidate calls. ON/Qwen generators accept `--source` pointing to a completed new OFF experiment and require distinct output directories.

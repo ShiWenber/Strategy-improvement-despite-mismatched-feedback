@@ -9,8 +9,8 @@ import numpy as np
 
 from .core import Policy, digest
 from .run import read_json, write_json
-from .specificity import (DEFAULT_ROOT, init_prompt, choose, seal_selections)
-from .specificity_assets import ARMS, SEEDS, RANKS
+from .specificity import (DEFAULT_ROOT, init_prompt, choose, seal_selections, population_root)
+from .specificity_assets import ARMS
 
 
 def summarize(values):
@@ -51,14 +51,16 @@ def holm(ps):
 def audit(root, manifest):
     root = Path(root)
     issues, records = [], []
+    populations = population_root(root, manifest)
+    initial_frozen_at = read_json(populations / 'manifest.json')['frozen_at']
     prompt_seal = read_json(root / 'PROMPTS_SEALED.json')
     prompt_hash = {r['id']: r['prompt_hash'] for r in prompt_seal['rows']}
     for job in manifest['init_jobs']:
-        r = read_json(root / 'requests_initial' / (job['id'] + '.json'))
+        r = read_json(populations / 'requests_initial' / (job['id'] + '.json'))
         records.append(r)
         if r['prompt'] != init_prompt(job['seed'], job['slot']):
             issues.append(job['id'] + ': initial prompt mismatch')
-        if r['started_at'] < manifest['frozen_at']:
+        if r['started_at'] < initial_frozen_at:
             issues.append(job['id'] + ': initial request before freeze')
     for job in manifest['jobs']:
         r = read_json(root / 'requests_candidates' / (job['id'] + '.json'))
@@ -96,7 +98,7 @@ def audit(root, manifest):
         path = root / 'candidates' / (j['id'] + '.json')
         if selected['candidate_hashes'][j['id']] != digest(path.read_text(encoding='utf-8')):
             issues.append(j['id'] + ': candidate changed after selection')
-    return {'issues': issues, 'n_requests': len(records),
+    result = {'issues': issues, 'n_requests': len(records),
             'statuses': dict(Counter(r['status'] for r in records)),
             'returned_models': dict(Counter(r.get('returned_model', 'missing') for r in records)),
             'usage_missing': sum(r.get('usage') is None for r in records),
@@ -105,6 +107,11 @@ def audit(root, manifest):
             'completion_tokens': sum((r.get('usage') or {}).get('completion_tokens', 0) for r in records),
             'effective_mismatch_contexts': prompt_seal['effective_mismatch_contexts'],
             'note': 'Record/hash/arithmetic audit, not an independent replay of every game.'}
+    if 'initial_source' in manifest:
+        new_records = records[len(manifest['init_jobs']):]
+        result.update(n_new_requests=len(new_records), n_reused_initial_requests=len(manifest['init_jobs']),
+                      new_total_tokens=sum((r.get('usage') or {}).get('total_tokens', 0) for r in new_records))
+    return result
 
 
 def behavior_delta(row, parent):
@@ -126,6 +133,8 @@ def behavior_delta(row, parent):
 def analyze(root, output_suffix=""):
     root = Path(root)
     manifest = read_json(root / 'manifest.json')
+    seeds = manifest['seeds']
+    populations = population_root(root, manifest)
     read_json(root / 'COMPLETE.json')
     audit_result = audit(root, manifest)
     write_json(root / f'AUDIT{output_suffix}.json', audit_result)
@@ -145,17 +154,17 @@ def analyze(root, output_suffix=""):
         metrics = {}
         for setting in ('default', 'noise01', 'long'):
             for metric in ('score', 'cooperation', 'worst_score'):
-                values = [mean(r['delta'][setting][metric] for r in arm_rows if r['seed'] == seed) for seed in SEEDS]
+                values = [mean(r['delta'][setting][metric] for r in arm_rows if r['seed'] == seed) for seed in seeds]
                 metrics[setting + '/' + metric] = summarize(values)
             for family in ('recovery', 'exploitation', 'random', 'memory'):
                 values = [mean(r['deployed'][setting]['families'][family] - parents[r['context']]['measured'][setting]['families'][family]
-                               for r in arm_rows if r['seed'] == seed) for seed in SEEDS]
+                               for r in arm_rows if r['seed'] == seed) for seed in seeds]
                 metrics[setting + '/family:' + family] = summarize(values)
-        behavior = {metric: summarize([mean(r['behavior_delta'][metric] for r in arm_rows if r['seed'] == seed) for seed in SEEDS])
+        behavior = {metric: summarize([mean(r['behavior_delta'][metric] for r in arm_rows if r['seed'] == seed) for seed in seeds])
                     for metric in arm_rows[0]['behavior_delta']}
         for rule in ('S1', 'S2', 'S3'):
             values = []
-            for seed in SEEDS:
+            for seed in seeds:
                 gains = []
                 for r in arm_rows:
                     if r['seed'] != seed:
@@ -176,7 +185,7 @@ def analyze(root, output_suffix=""):
             sm = {}
             for setting in ('default', 'noise01', 'long'):
                 values = [mean(by_id[r['winner']]['delta'][setting]['score'] if r['winner'] else 0.
-                               for r in winners if r['seed'] == seed) for seed in SEEDS]
+                               for r in winners if r['seed'] == seed) for seed in seeds]
                 sm[setting] = summarize(values)
             chosen[rule + '/' + arm] = {'accepted': sum(r['accepted'] for r in winners), 'n': len(winners), 'metrics': sm,
                                        'accepted_default_degrades': sum(r['winner'] is not None and by_id[r['winner']]['delta']['default']['score'] < 0 for r in winners)}
@@ -189,7 +198,7 @@ def analyze(root, output_suffix=""):
     associations = []
     for cid in sorted(parents):
         seed = next(r['seed'] for r in rows if r['context'] == cid)
-        pop = read_json(root / 'populations' / f's{seed}.json')
+        pop = read_json(populations / 'populations' / f's{seed}.json')
         context = read_json(root / 'contexts' / (cid + '.json'))
         f = pop['diagnostics'][context['slot']]
         deficit = 1 - mean(f[k]['mean']['mutual_cooperation_last5'] for k in ('one_D_TFT', 'four_D_TFT', 'four_D_ALLC'))
@@ -211,7 +220,7 @@ def analyze(root, output_suffix=""):
         rng = np.random.default_rng(2026091904)
         coefficients = []
         for _ in range(5000):
-            sample = [r for seed in rng.choice(SEEDS, len(SEEDS), replace=True) for r in associations if r['seed'] == seed]
+            sample = [r for seed in rng.choice(seeds, len(seeds), replace=True) for r in associations if r['seed'] == seed]
             value = slope(sample, feature)
             if value is not None:
                 coefficients.append(value)
@@ -226,12 +235,14 @@ def analyze(root, output_suffix=""):
     result = {'audit': audit_result, 'raw': raw, 'selected': chosen, 'primary': primary,
               'selection_disagreements': disagreements, 'parent_feature_associations_exploratory': associations,
               'parent_feature_interactions_exploratory': feature_effects,
-              'note': '20 independent population clusters. Original prespecified primary: Accurate versus Mismatched raw proposals. Selected outputs, behaviour and parent-feature associations are exploratory; CIs are unadjusted seed-bootstrap intervals.'}
+              'note': f'{len(seeds)} independent population clusters. Original prespecified primary: Accurate versus Mismatched raw proposals. Selected outputs, behaviour and parent-feature associations are exploratory; CIs are unadjusted seed-bootstrap intervals.'}
+    if len(seeds) == 1:
+        result['note'] += ' Single-population API check: bootstrap intervals and sign-swap p-values are not evidence about the paper population.'
     write_json(root / f'ANALYSIS{output_suffix}.json', result)
-    lines = ['# 诊断针对性实验 v2：冻结协议结果', '', f"完成 {audit_result['n_requests']} 次请求；报告 tokens {audit_result['total_tokens']:,}；审计问题 {len(audit_result['issues'])}。", '',
+    lines = ['# 诊断针对性实验 v2：冻结协议结果', '', f"完成 {audit_result.get('n_new_requests', audit_result['n_requests'])} 次新请求；报告 tokens {audit_result.get('new_total_tokens', audit_result['total_tokens']):,}；审计问题 {len(audit_result['issues'])}。", '',
              '| 组别 | 有效候选 | 原始默认增量 | S1 后增量 | S2 后增量 | S3 后增量 |', '| --- | ---: | ---: | ---: | ---: | ---: |']
     for arm in ARMS:
-        lines.append(f"| {arm} | {raw[arm]['valid']}/120 | {raw[arm]['metrics']['default/score']['mean']:+.6f} | " +
+        lines.append(f"| {arm} | {raw[arm]['valid']}/{raw[arm]['n']} | {raw[arm]['metrics']['default/score']['mean']:+.6f} | " +
                      ' | '.join(f"{chosen[r + '/' + arm]['metrics']['default']['mean']:+.6f}" for r in ('S1', 'S2', 'S3')) + ' |')
     lines += ['', f"主比较 accurate−mismatched：{primary['mean']:+.6f}，95% 区间 {primary['ci95']}，配对符号交换 p={primary['sign_swap_p']:.6f}。", '', result['note'], '']
     (root / f'REPORT{output_suffix}.md').write_text('\n'.join(lines), encoding='utf-8')
