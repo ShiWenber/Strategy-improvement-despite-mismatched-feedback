@@ -1,7 +1,7 @@
 """Shared presentation conventions for the manuscript Results figure set.
 
-Rendering only: English text, parenthesized panel headings, and complete
-figure-level legends centred at the top. No analysis or file I/O here.
+Rendering only: English text, letter-only panel headings, and independent
+legends inside lettered panels. Interval definitions belong in captions.
 """
 from matplotlib.lines import Line2D
 from matplotlib.legend_handler import HandlerBase
@@ -40,12 +40,15 @@ def apply_style():
         'pdf.fonttype':42,'ps.fonttype':42,'svg.fonttype':'none',
         'savefig.dpi':300})
 
-def panel_title(ax, letter, title, pad=8, **kwargs):
-    return ax.set_title(f'({letter}) {title}',loc='left',fontweight='bold',
+def panel_title(ax, letter, title='', pad=8, **kwargs):
+    assert not title, 'Move descriptive panel titles into the caption.'
+    return ax.set_title(f'({letter})',loc='left',fontweight='bold',
                         fontsize=PANEL_FONT,pad=pad,**kwargs)
 
 def panel_heading(fig, letter, title, x, y, **kwargs):
-    return fig.text(x,y,f'({letter}) {title}',ha='left',va='bottom',
+    assert not title, 'Move descriptive panel titles into the caption.'
+    text = f'({letter})'
+    return fig.text(x,y,text,ha='left',va='bottom',
                     fontsize=PANEL_FONT,fontweight='bold',**kwargs)
 
 def top_legend(fig, handles, labels, ncol=3, handler_map=None, **kwargs):
@@ -55,3 +58,14 @@ def top_legend(fig, handles, labels, ncol=3, handler_map=None, **kwargs):
         bbox_transform=fig.transFigure,ncol=ncol,frameon=False,fontsize=LEGEND_FONT,
         borderaxespad=0,handlelength=1.65,handletextpad=.5,columnspacing=1.25,
         labelspacing=.45,handler_map=mapping,**kwargs)
+
+def panel_legend(ax, handles, labels, ncol=2, handler_map=None):
+    assert not any('95%' in label or isinstance(handle, IntervalKey)
+                   for handle, label in zip(handles, labels)), 'Explain intervals in the caption.'
+    mapping={}
+    if handler_map: mapping.update(handler_map)
+    return ax.legend(handles, labels, loc='upper center', ncol=ncol,
+        frameon=True, facecolor='white', edgecolor='none', framealpha=1,
+        fontsize=LEGEND_FONT, borderaxespad=.35,
+        handlelength=1.4, handletextpad=.4, columnspacing=.85, labelspacing=.3,
+        handler_map=mapping)
