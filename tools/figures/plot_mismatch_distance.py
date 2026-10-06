@@ -1,8 +1,13 @@
 """Draw report-distance display from sealed records only; no analyses."""
 from pathlib import Path
-import json,os
+import argparse,json,os
 ROOT=Path(__file__).resolve().parents[2]
-SOURCES=[ROOT/f'docs/direct_reciprocity/mismatch_distance/mismatch_distance_thinking_{m}.json' for m in ('off','on')]
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--inputs',nargs=2,type=Path,default=[ROOT/f'docs/direct_reciprocity/mismatch_distance/mismatch_distance_thinking_{m}.json' for m in ('off','on')])
+parser.add_argument('--output-dir',type=Path,default=ROOT/'reproduct')
+parser.add_argument('--audit-dir',type=Path,default=ROOT/'results/reproduction')
+args=parser.parse_args()
+SOURCES=args.inputs
 os.environ.setdefault('MPLCONFIGDIR',str(ROOT/'.mplconfig'))
 import matplotlib
 matplotlib.use('Agg')
@@ -28,5 +33,5 @@ fig.text(.52,.055,'Standardized report distance',ha='center',fontsize=9)
 handles=[Line2D([],[],color=BLUE,lw=1.4),Line2D([],[],marker='o',color=BLUE,ls='none'),Line2D([],[],color=GREY,ls=':',lw=1.1),Line2D([],[],marker='s',color=GREY,ls='none'),IntervalKey(BLUE),IntervalKey(GREY)]
 labels=['Parent–donor ECDF','Parent–donor mean','Reference 10th percentile','Reference mean','Parent–donor full range','Reference 10th–90th percentiles']
 top_legend(fig,handles,labels,ncol=3)
-r=render_audit(fig,'figS6',SOURCES,__file__,labels,['Reference P10 is the 10th percentile of 2640 ordered distinct within-population pairs.','Parent–donor range is the frozen full minimum–maximum range. Reference P10–P90 is a frozen percentile range. Neither range is a confidence interval.','No distance calculation, reference construction, association, bootstrap, or threshold analysis was run.']);plt.close(fig)
+r=render_audit(fig,'figS6',SOURCES,__file__,labels,['Reference P10 is the 10th percentile of 2640 ordered distinct within-population pairs.','Parent–donor range is the frozen full minimum–maximum range. Reference P10–P90 is a frozen percentile range. Neither range is a confidence interval.','No distance calculation, reference construction, association, bootstrap, or threshold analysis was run.'],output_dir=args.output_dir,audit_dir=args.audit_dir);plt.close(fig)
 print(json.dumps({'figure':r['figure'],'bounds':r['out_of_canvas_text'],'minimum_font_pt':r['minimum_font_pt']}))

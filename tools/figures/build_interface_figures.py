@@ -1,6 +1,6 @@
 """Render two-condition distributions and sealed selection outcomes."""
 from pathlib import Path
-import json, os
+import argparse,json,os
 ROOT=Path(__file__).resolve().parents[2]
 os.environ.setdefault('MPLCONFIGDIR',str(ROOT/'.mplconfig'))
 import matplotlib
@@ -23,7 +23,7 @@ def vector(report,stage,arm):
  row=report['raw'][arm]['metrics']['default/score'] if stage=='Raw' else report['selected']['S3/'+arm]['metrics']['default']
  return np.asarray(row['seed_values'])
 
-def generation_figure(populations,display):
+def generation_figure(populations,display,args):
  fig=plt.figure(figsize=(WIDTH,5.60));grid=fig.add_gridspec(2,2,left=.115,right=.985,bottom=.13,top=.81,height_ratios=(1.2,1),hspace=.67,wspace=.44)
  ax=fig.add_subplot(grid[0,0])
  for i,mode in enumerate(MODES):
@@ -51,11 +51,17 @@ def generation_figure(populations,display):
  handles += [Patch(facecolor=c,hatch=h,edgecolor='white') for _,_,c,h in states]
  labels=['OFF outputs','ON outputs','Raw','S3','Same population','Mean','Zero gain']+[s[0] for s in states]
  top_legend(fig,handles,labels,ncol=5,handler_map={tuple:HandlerTuple(ndivide=None,pad=.12)})
- record=render_audit(fig,'figS2',[POP,DISP],__file__,labels,['OFF/ON compound keys each show the histogram fill and the density curve.','Histogram heights and Gaussian KDE curves are recomputed from the 240 raw gains per configuration.','Existing across-population means are read from mean_raw and mean_s3.']);plt.close(fig);return record
+ record=render_audit(fig,'figS2',[args.input,args.display_output],__file__,labels,['OFF/ON compound keys each show the histogram fill and the density curve.','Histogram heights and Gaussian KDE curves are recomputed from the 240 raw gains per configuration.','Existing across-population means are read from mean_raw and mean_s3.'],output_dir=args.output_dir,audit_dir=args.audit_dir);plt.close(fig);return record
 
 def main():
  from scipy.stats import gaussian_kde
- cache=read(POP);pop={m:cache['configurations'][k] for m,k in zip(MODES,('Off / 6k','On / 384k'))}
+ parser=argparse.ArgumentParser(description=__doc__)
+ parser.add_argument('--input',type=Path,default=POP)
+ parser.add_argument('--display-output',type=Path,default=DISP)
+ parser.add_argument('--output-dir',type=Path,default=ROOT/'reproduct')
+ parser.add_argument('--audit-dir',type=Path,default=ROOT/'results/reproduction')
+ args=parser.parse_args()
+ cache=read(args.input);pop={m:cache['configurations'][k] for m,k in zip(MODES,('Off / 6k','On / 384k'))}
  display={'histograms':{},'density_curves':{},'method':'Gaussian KDE with Scott bandwidth; 30 equal-width bins over shared candidate range; two report conditions only'}
  all_values=np.concatenate([row['all_raw_gains'] for row in pop.values()])
  edges=np.linspace(min(-.25,all_values.min()),max(.5,all_values.max()),31)
@@ -66,7 +72,7 @@ def main():
   display['histograms'][mode]=[{'left':float(a),'right':float(b),'height':float(h)} for a,b,h in zip(edges[:-1],edges[1:],height)]
   display['density_curves'][mode]=np.column_stack([x,gaussian_kde(values)(x)]).tolist()
  display['ymax']=float(max(max(b['height'] for b in bars) for bars in display['histograms'].values())*1.1)
- DISP.parent.mkdir(parents=True,exist_ok=True);DISP.write_text(json.dumps(display,indent=2)+'\n',encoding='utf-8')
- records=[generation_figure(pop,display)]
+ args.display_output.parent.mkdir(parents=True,exist_ok=True);args.display_output.write_text(json.dumps(display,indent=2)+'\n',encoding='utf-8')
+ records=[generation_figure(pop,display,args)]
  print(json.dumps([{'figure':r['figure'],'bounds':r['out_of_canvas_text'],'minimum_font_pt':r['minimum_font_pt']} for r in records]))
 if __name__=='__main__':main()

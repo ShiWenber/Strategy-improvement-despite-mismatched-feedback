@@ -34,6 +34,8 @@ def main():
               'live_api_calls': 0, 'max_abs_error': max((max(r['errors'].values()) for r in records if 'errors' in r), default=0)}
     a.output.parent.mkdir(parents=True, exist_ok=True)
     a.output.write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
+    if result['max_abs_error'] > 1e-12 or any(r['status'] not in ('ok', 'invalid_candidate_no_game_replay') for r in records):
+        raise RuntimeError('Game replay differs from recorded results; inspect ' + str(a.output))
     print(json.dumps({'records': len(records), 'games_replayed': result['games_replayed'], 'max_abs_error': result['max_abs_error']}))
 
 

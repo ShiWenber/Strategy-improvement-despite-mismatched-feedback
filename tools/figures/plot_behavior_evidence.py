@@ -7,17 +7,17 @@ from __future__ import annotations
 
 from collections import defaultdict
 from hashlib import sha256
+import argparse
 import json
 from pathlib import Path
 from statistics import mean
 
 REPO = Path(__file__).resolve().parents[2]
-OUT = REPO / 'results' / 'reciprocity_population_visuals_20260924' / 'behavior'
 import numpy as np
 
 ROOTS = {
-    'non_thinking': REPO / 'results' / 'feedback_specificity_v2',
-    'thinking': REPO / 'results' / 'feedback_specificity_thinking_384k_20260923',
+    'non_thinking': 'results/feedback_specificity_v2',
+    'thinking': 'results/feedback_specificity_thinking_384k_20260923',
 }
 LABELS = {'non_thinking': 'Thinking OFF', 'thinking': 'Thinking ON'}
 ARMS = ('accurate', 'mismatched')
@@ -53,10 +53,10 @@ def summarize(v):
             'zero': int((np.abs(a) <= 1e-12).sum())}
 
 
-def analyze(config, root):
+def analyze(config, root, analysis_suffix=""):
     manifest = read(root / 'manifest.json')
     seal = read(root / 'SELECTIONS_SEALED.json')
-    frozen = read(root / 'ANALYSIS.json')
+    frozen = read(root / f'ANALYSIS{analysis_suffix}.json')
     expected = frozen['thinking'] if config == 'thinking' else frozen
     selection = {(r['context'], r['arm']): r for r in seal['rows'] if r['rule'] == 'S3'}
     assert len(selection) == 120
@@ -132,8 +132,16 @@ def analyze(config, root):
 
 
 def main():
-    OUT.mkdir(parents=True, exist_ok=True)
-    data = {config: analyze(config, root) for config, root in ROOTS.items()}
+    global REPO
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--work', type=Path, default=REPO)
+    parser.add_argument('--analysis-suffix', default='')
+    parser.add_argument('--output', type=Path)
+    args = parser.parse_args()
+    REPO = args.work.resolve()
+    output = args.output or REPO / 'results/reciprocity_population_visuals_20260924/behavior/ANALYSIS.json'
+    output.parent.mkdir(parents=True, exist_ok=True)
+    data = {config: analyze(config, REPO / root, args.analysis_suffix) for config, root in ROOTS.items()}
     for mode in ('controlled', 'natural'):
         for metric in METRICS:
             key = f'{mode}/pooled/{metric}'
@@ -146,7 +154,7 @@ def main():
               'no_new_games_or_model_calls': True,
               'configs': data, 'input_sha256': INPUT_HASHES,
               'analysis_script_sha256': sha256(Path(__file__).read_bytes()).hexdigest()}
-    (OUT / 'ANALYSIS.json').write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+    output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
     print('Recomputed independent behaviour for two report conditions')
 
 

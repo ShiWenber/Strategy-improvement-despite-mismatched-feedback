@@ -5,6 +5,7 @@ The original population is the aggregation and bootstrap unit. These are
 descriptive, post hoc comparisons, not new confirmatory hypothesis tests.
 """
 from collections import defaultdict
+import argparse
 import json
 from pathlib import Path
 from statistics import mean
@@ -25,6 +26,12 @@ def read(path):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--work', type=Path, default=ROOT)
+    parser.add_argument('--analysis-suffix', default='')
+    parser.add_argument('--output', type=Path)
+    args = parser.parse_args()
+    work = args.work.resolve()
     indices = np.random.default_rng(BOOTSTRAP_SEED).integers(
         0, len(SEEDS), size=(N_BOOTSTRAP, len(SEEDS))
     )
@@ -79,10 +86,10 @@ def main():
         ("non_thinking", "feedback_specificity_v2"),
         ("thinking", "feedback_specificity_thinking_384k_20260923"),
     ]:
-        source = ROOT / "results" / run
+        source = work / "results" / run
         manifest = read(source / "manifest.json")
         sealed = read(source / "SELECTIONS_SEALED.json")
-        frozen = read(source / "ANALYSIS.json")
+        frozen = read(source / f"ANALYSIS{args.analysis_suffix}.json")
         expected = frozen["thinking"] if mode == "thinking" else frozen
         selection = {
             (row["context"], row["arm"]): row
@@ -177,7 +184,7 @@ def main():
                 )
                 contrasts[stage][family] = summarize(values)
         result["configs"][mode] = {
-            "source_root": source.relative_to(ROOT).as_posix(),
+            "source_root": source.relative_to(work).as_posix(),
             "source_files": ["manifest.json", "SELECTIONS_SEALED.json", "ANALYSIS.json", "holdout/<context>.json", "holdout/<candidate_id>.json"],
             "n_parents": 60, "n_pools_included": 120, "n_raw_slots_included": 240,
             "default_H_fallback_slots_by_arm": failures,
@@ -193,7 +200,7 @@ def main():
                 "checks": validation,
             },
         }
-    destination = ROOT / "results" / "figure4_opponent_profiles_20260926" / "ANALYSIS.json"
+    destination = args.output or work / "results/figure4_opponent_profiles_20260926/ANALYSIS.json"
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Wrote {destination}; all aggregation checks passed.")

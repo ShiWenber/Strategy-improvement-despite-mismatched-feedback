@@ -123,12 +123,12 @@ def behavior_delta(row, parent):
     return result
 
 
-def analyze(root):
+def analyze(root, output_suffix=""):
     root = Path(root)
     manifest = read_json(root / 'manifest.json')
     read_json(root / 'COMPLETE.json')
     audit_result = audit(root, manifest)
-    write_json(root / 'AUDIT.json', audit_result)
+    write_json(root / f'AUDIT{output_suffix}.json', audit_result)
     if audit_result['issues']:
         raise RuntimeError('Audit failed; do not interpret incomplete or inconsistent results')
     rows = [read_json(root / 'holdout' / (j['id'] + '.json')) for j in manifest['jobs']]
@@ -227,20 +227,21 @@ def analyze(root):
               'selection_disagreements': disagreements, 'parent_feature_associations_exploratory': associations,
               'parent_feature_interactions_exploratory': feature_effects,
               'note': '20 independent population clusters. Original prespecified primary: Accurate versus Mismatched raw proposals. Selected outputs, behaviour and parent-feature associations are exploratory; CIs are unadjusted seed-bootstrap intervals.'}
-    write_json(root / 'ANALYSIS.json', result)
+    write_json(root / f'ANALYSIS{output_suffix}.json', result)
     lines = ['# 诊断针对性实验 v2：冻结协议结果', '', f"完成 {audit_result['n_requests']} 次请求；报告 tokens {audit_result['total_tokens']:,}；审计问题 {len(audit_result['issues'])}。", '',
              '| 组别 | 有效候选 | 原始默认增量 | S1 后增量 | S2 后增量 | S3 后增量 |', '| --- | ---: | ---: | ---: | ---: | ---: |']
     for arm in ARMS:
         lines.append(f"| {arm} | {raw[arm]['valid']}/120 | {raw[arm]['metrics']['default/score']['mean']:+.6f} | " +
                      ' | '.join(f"{chosen[r + '/' + arm]['metrics']['default']['mean']:+.6f}" for r in ('S1', 'S2', 'S3')) + ' |')
     lines += ['', f"主比较 accurate−mismatched：{primary['mean']:+.6f}，95% 区间 {primary['ci95']}，配对符号交换 p={primary['sign_swap_p']:.6f}。", '', result['note'], '']
-    (root / 'REPORT.md').write_text('\n'.join(lines), encoding='utf-8')
+    (root / f'REPORT{output_suffix}.md').write_text('\n'.join(lines), encoding='utf-8')
     return result
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('root', nargs='?', default=DEFAULT_ROOT)
+    parser.add_argument('--output-suffix', default='', help='Append to generated audit, analysis and report filenames.')
     args = parser.parse_args()
-    result = analyze(args.root)
+    result = analyze(args.root, args.output_suffix)
     print(json.dumps({'primary': result['primary'], 'audit': result['audit']}))

@@ -435,7 +435,7 @@ def summarize_distances(rows, key='delta_full'):
 # ---------------------------------------------------------------------------
 # Regime analysis
 # ---------------------------------------------------------------------------
-def analyze_regime(name, root, output_dir):
+def analyze_regime(name, root, output_dir, output_suffix=""):
     regime = load_regime(root)
     rows, diagnostics, names = build_distances(regime)
     rows, raw = assemble_outcomes(regime, rows)
@@ -536,7 +536,7 @@ def analyze_regime(name, root, output_dir):
                  'covariate. Associations are exploratory and use 20 population clusters. Sign of tau_raw is '
                  'Accurate minus Mismatched; positive means accurate diagnosis produced the better raw candidate.'),
     }
-    write_json(Path(output_dir) / f'mismatch_distance_{name}.json', payload)
+    write_json(Path(output_dir) / f'mismatch_distance_{name}{output_suffix}.json', payload)
     return payload
 
 
@@ -831,6 +831,7 @@ def main():
     parser.add_argument('--root', default='.', help='Worktree root (module import + results base).')
     parser.add_argument('--docs', default='docs/direct_reciprocity')
     parser.add_argument('--out-dir', default=None)
+    parser.add_argument('--output-suffix', default='')
     args = parser.parse_args()
     base = Path(args.root).resolve()
     out_dir = Path(args.out_dir) if args.out_dir else base / args.docs / 'mismatch_distance'
@@ -841,8 +842,8 @@ def main():
         if not root.exists():
             print(json.dumps({'skipped': name, 'missing': str(root)}))
             continue
-        payloads[name] = analyze_regime(name, root, out_dir)
-    markdown_path = base / args.docs / 'MISMATCH_DISTANCE_ANALYSIS.md'
+        payloads[name] = analyze_regime(name, root, out_dir, args.output_suffix)
+    markdown_path = base / args.docs / f'MISMATCH_DISTANCE_ANALYSIS{args.output_suffix}.md'
     write_markdown(payloads, markdown_path)
     print(json.dumps({'regimes': list(payloads), 'markdown': str(markdown_path), 'json_dir': str(out_dir)},
                      ensure_ascii=False))

@@ -10,13 +10,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--work', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--analysis-suffix', default='')
+    parser.add_argument('--output-suffix', default='')
     a = parser.parse_args()
     a.output.mkdir(parents=True, exist_ok=True)
 
     def read(rel):
-        return json.loads((a.work / rel).read_text(encoding='utf-8-sig'))
+        path = a.work / rel
+        return json.loads(path.with_name(path.stem + a.analysis_suffix + path.suffix).read_text(encoding='utf-8-sig'))
 
     def emit(stem, headers, rows):
+        stem += a.output_suffix
         with (a.output / (stem + '.csv')).open('w', newline='', encoding='utf-8') as f:
             csv.writer(f).writerows([headers, *rows])
         lines = ['% Generated from archived full-precision records; current paper numbering.',

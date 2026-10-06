@@ -1,8 +1,13 @@
 """Pure render of frozen opponent-family summaries; no table writes."""
 from pathlib import Path
-import json,os
+import argparse,json,os
 W=Path(__file__).resolve().parents[2]
-INPUT=W/'results/figure4_opponent_profiles_20260926/ANALYSIS.json'
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--input',type=Path,default=W/'results/figure4_opponent_profiles_20260926/ANALYSIS.json')
+parser.add_argument('--output-dir',type=Path,default=W/'reproduct')
+parser.add_argument('--audit-dir',type=Path,default=W/'results/reproduction')
+args=parser.parse_args()
+INPUT=args.input
 os.environ.setdefault('MPLCONFIGDIR',str(W/'.mplconfig'))
 import matplotlib
 matplotlib.use('Agg')
@@ -31,6 +36,6 @@ fig.text(.19,.073,'Payoff gain per round relative to the same parent',ha='left',
 handles=[Patch(facecolor=BLUE,alpha=.8),Patch(facecolor=ORANGE,alpha=.8,hatch='///',edgecolor='white'),IntervalKey(),Line2D([],[],color=GREY,lw=.8),Patch(facecolor='#F4F5F6')]
 legendlabels=['Accurate','Mismatched','95% CI','Zero gain','Below-parent gain']
 top_legend(fig,handles,legendlabels,ncol=3)
-r=render_audit(fig,'figS4',[INPUT],__file__,legendlabels,['Existing arm-specific unadjusted 95% population-bootstrap intervals reused; paired contrasts are unchanged in supplementary tables.','Original bar and hatch encoding retained. Alternating row shading only assists alignment.']);plt.close(fig)
+r=render_audit(fig,'figS4',[INPUT],__file__,legendlabels,['Existing arm-specific unadjusted 95% population-bootstrap intervals reused; paired contrasts are unchanged in supplementary tables.','Original bar and hatch encoding retained. Alternating row shading only assists alignment.'],output_dir=args.output_dir,audit_dir=args.audit_dir);plt.close(fig)
 print(json.dumps({'figure':r['figure'],'bounds':r['out_of_canvas_text'],'minimum_font_pt':r['minimum_font_pt']}))
 
