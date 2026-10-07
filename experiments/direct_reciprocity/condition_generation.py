@@ -1,15 +1,16 @@
 """Shared candidate requests, sequential condition batches and per-condition data logs."""
 import argparse
-from dataclasses import asdict, replace
+from dataclasses import asdict
+from hashlib import sha256
 import json
 from pathlib import Path
 import threading
 import time
 import traceback
 
-from .baselines import TRAIN
-from .core import Config, Policy, match
-from .records import read_json, write_json, cached_request, begin_request, filehash
+from .core import Config, Policy
+from .records import read_json, write_json, cached_request, begin_request
+from .run import Generator, validate
 from .specificity_assets import SCORE_ARMS, generation_arms
 
 _LOG_LOCK = threading.Lock()
@@ -45,27 +46,6 @@ def transport_diagnostics(exc, secret):
                                  for f in traceback.extract_tb(exc.__traceback__)]})
         exc = exc.__cause__ if exc.__cause__ is not None else (None if exc.__suppress_context__ else exc.__context__)
     return chain
-
-
-def validate(record, identity, cfg):
-    if not record.get('content') or record.get('finish_reason') == 'length':
-        record.update(status='invalid', validation_error='Missing or truncated program output')
-        return None
-    code = record['content']
-    if code.strip().startswith('```'):
-        lines = code.strip().splitlines()
-        if lines[-1].strip() == '```':
-            code = '\n'.join(lines[1:-1])
-    policy = Policy(identity, code)
-    try:
-        policy.compile()
-        for opponent in TRAIN:
-            match(policy, opponent, replace(cfg, repeats=1), 12345)
-    except Exception as exc:
-        record.update(status='invalid', validation_error=f'{type(exc).__name__}: {exc}')
-        return None
-    record.update(status='valid', code_hash=policy.key)
-    return policy
 
 
 def receive_stream(stream, sink, progress):
@@ -161,9 +141,11 @@ def data_log_row(root, job):
                         ('selection_scores', 'selection_scores'), ('holdout', 'holdout')]:
         relative = f"{folder}/{job['id']}.json"
         path = root / relative
-        row[key] = read_json(path) if path.exists() else None
-        if row[key] is not None:
-            row['record_sha256'][relative] = filehash(path)
+        row[key] = None
+        if path.exists():
+            content = path.read_bytes()
+            row[key] = json.loads(content)
+            row['record_sha256'][relative] = sha256(content).hexdigest()
     row['status'] = row['request']['status'] if row['request'] else 'pending'
     return row
 
@@ -178,26 +160,26 @@ def append_data_log(root, job):
             stream.write(json.dumps(row, ensure_ascii=False) + '\n')
 
 
-def write_arm_log(root, manifest, arm):
-    if arm not in manifest['arms']:
-        raise ValueError('Condition absent from frozen batch: ' + arm)
-    path = log_path(root, arm)
-    with _LOG_LOCK:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix('.jsonl.tmp')
-        with temp.open('w', encoding='utf-8') as stream:
-            for job in manifest['jobs']:
-                if job['arm'] == arm:
-                    stream.write(json.dumps(data_log_row(root, job), ensure_ascii=False) + '\n')
-        temp.replace(path)
-    return path
+def write_arm_logs(root, manifest, arm=None):
+    """Atomically export one condition or all conditions using the same log schema."""
+    paths = []
+    for condition in ((arm,) if arm is not None else generation_arms(manifest['arms'])):
+        if condition not in manifest['arms']:
+            raise ValueError('Condition absent from frozen batch: ' + condition)
+        path = log_path(root, condition)
+        with _LOG_LOCK:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temp = path.with_suffix('.jsonl.tmp')
+            with temp.open('w', encoding='utf-8') as stream:
+                for job in manifest['jobs']:
+                    if job['arm'] == condition:
+                        stream.write(json.dumps(data_log_row(root, job), ensure_ascii=False) + '\n')
+            temp.replace(path)
+        paths.append(path)
+    return paths
 
 
-def write_arm_logs(root, manifest):
-    return [write_arm_log(root, manifest, arm) for arm in generation_arms(manifest['arms'])]
-
-
-def generate_candidate(root, job, arm, *, provider='deepseek', mode='off', generator_factory=None):
+def generate_candidate(root, job, arm, *, provider='deepseek', mode='off'):
     """All models share the same condition parameter, candidate record and log path."""
     if arm not in SCORE_ARMS or job['arm'] != arm:
         raise ValueError('Candidate information condition differs from task')
@@ -215,10 +197,7 @@ def generate_candidate(root, job, arm, *, provider='deepseek', mode='off', gener
                 raise RuntimeError('Cached candidate differs from frozen task or request: ' + job['id'])
             return {'id': job['id'], 'arm': arm, 'cached': True}
         if provider == 'deepseek' and mode == 'off':
-            if generator_factory is None:
-                from .run import Generator
-                generator_factory = Generator
-            generator = generator_factory(root / 'requests_candidates', provider, spec['model'], cfg.temperature)
+            generator = Generator(root / 'requests_candidates', provider, spec['model'], cfg.temperature)
             policy = generator.generate(job['id'], spec['prompt'], cfg)
         else:
             policy = streamed_program(root, job, spec, cfg, require_reasoning=mode == 'on')
@@ -230,6 +209,11 @@ def generate_candidate(root, job, arm, *, provider='deepseek', mode='off', gener
                 'finish_reason': record.get('finish_reason'), 'usage': record.get('usage')}
     finally:
         append_data_log(root, job)
+
+
+def candidate_job(arg, *, provider='deepseek', mode='off'):
+    root, job = arg
+    return generate_candidate(root, job, job['arm'], provider=provider, mode=mode)
 
 
 def jobs_for_arm(root, manifest, arm):
@@ -248,22 +232,14 @@ def jobs_for_arm(root, manifest, arm):
     return [j for j in manifest['jobs'] if j['arm'] == arm]
 
 
-def generate_arm(root, manifest, arm, workers, generate_one):
-    from .specificity import pool_run
-    jobs = jobs_for_arm(root, manifest, arm)
-    try:
-        pool_run(generate_one, [(str(root), job) for job in jobs], workers, root, 'generate_' + arm)
-    finally:
-        write_arm_log(root, manifest, arm)
-
-
 def generate_conditions(root, manifest, workers, generate_one, arm=None):
+    from .specificity import pool_run
     for condition in ((arm,) if arm is not None else generation_arms(manifest['arms'])):
-        generate_arm(root, manifest, condition, workers, generate_one)
-
-
-def first_job(root, manifest, arm=None):
-    return jobs_for_arm(root, manifest, arm or generation_arms(manifest['arms'])[0])[0]
+        jobs = jobs_for_arm(root, manifest, condition)
+        try:
+            pool_run(generate_one, [(str(root), job) for job in jobs], workers, root, 'generate_' + condition)
+        finally:
+            write_arm_logs(root, manifest, condition)
 
 
 def main():

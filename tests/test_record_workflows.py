@@ -101,12 +101,11 @@ def test_paired_cli_reuses_frozen_inputs_and_dispatches_existing_kernels(tmp_pat
     assert frozen['prompt_hashes'] == {job['id']: records.digest(context['prompts'][job['arm']])
                                        for job in manifest['jobs']}
     assert paired_control.prepare(output, source, provider) == frozen
-    module = paired_control.settings(provider, output)[0]
     args = ['paired_control', 'first', '--provider', provider, '--output', str(output), '--source', str(source)]
     monkeypatch.setattr(sys, 'argv', args)
-    with patch.object(module, 'generate_one', return_value={'id': frozen['jobs'][0]['id']}) as generated:
+    with patch.object(paired_control, 'candidate_job', return_value={'id': frozen['jobs'][0]['id']}) as generated:
         paired_control.main()
-        generated.assert_called_once_with((str(output), frozen['jobs'][0]))
+        generated.assert_called_once_with((str(output), frozen['jobs'][0]), provider=provider, mode=mode)
     assert records.read_json(output / 'FIRST_REQUEST_CHECK.json')['completed']
     copied = output / 'contexts' / (cid + '.json')
     copied.write_text('{}')
