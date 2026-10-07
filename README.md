@@ -122,43 +122,12 @@ Command numbers refer to the block above. Main Tables I–II define the report c
 
 ## Optional new API generation
 
-Copy `.env.example` to `.env` and configure `DEEPSEEK_API_KEY`, `DEEPSEEK_API_BASE`, `QWEN_API_KEY` and `QWEN_API_BASE` for the providers used by the experiment. Run the following commands from the project root with an empty `results/api_reproduct/` workspace.
-
-This regenerates the full experiment: 20 populations (seeds 200-219), 60 parents (ranks 1, 3 and 6), and two candidates per parent and report condition. DeepSeek OFF makes 240 initialization calls and 240 candidate calls. DeepSeek ON and Qwen OFF/ON each make 240 candidate calls using the same newly generated OFF parents and prompts: **1,200 API calls in total, including 960 candidate responses**. All four configurations use S1/S2/S3 selection and the independent holdout and behavioural measurements.
-
-The new workspace follows the project's `results/` layout, so existing analysis scripts can read it with `--work results/api_reproduct`. Source code stays in this project. Complete DeepSeek OFF before preparing the other configurations.
+Copy `.env.example` to `.env` and configure `DEEPSEEK_API_KEY`, `DEEPSEEK_API_BASE`, `QWEN_API_KEY` and `QWEN_API_BASE`. Run [tools/generate_api.sh](tools/generate_api.sh) with a POSIX shell (Git Bash on Windows):
 
 ```sh
-uv run python -m experiments.direct_reciprocity.specificity freeze --output results/api_reproduct/results/feedback_specificity_v2
-uv run python -m experiments.direct_reciprocity.specificity all --output results/api_reproduct/results/feedback_specificity_v2 --workers 12 --api-workers 8 --env-file .env
-uv run python -m experiments.direct_reciprocity.specificity_analysis results/api_reproduct/results/feedback_specificity_v2 --output-suffix _reproduct
-uv run python -m experiments.direct_reciprocity.role_analysis results/api_reproduct/results/feedback_specificity_v2 --analysis-file ANALYSIS_reproduct.json --output-suffix _reproduct
-
-uv run python -m experiments.direct_reciprocity.thinking_control prepare --output results/api_reproduct/results/feedback_specificity_thinking_384k_20260923 --source results/api_reproduct/results/feedback_specificity_v2 --env-file .env
-uv run python -m experiments.direct_reciprocity.thinking_control first --output results/api_reproduct/results/feedback_specificity_thinking_384k_20260923 --source results/api_reproduct/results/feedback_specificity_v2 --env-file .env
-uv run python -m experiments.direct_reciprocity.thinking_control all --output results/api_reproduct/results/feedback_specificity_thinking_384k_20260923 --source results/api_reproduct/results/feedback_specificity_v2 --workers 12 --api-workers 8 --env-file .env
-uv run python thinking_control_analysis.py results/api_reproduct/results/feedback_specificity_thinking_384k_20260923 --source results/api_reproduct/results/feedback_specificity_v2 --source-analysis ANALYSIS_reproduct.json --output-suffix _reproduct
-
-uv run python -m experiments.direct_reciprocity.qwen38_control prepare --output results/api_reproduct/results/qwen3_8/off --source results/api_reproduct/results/feedback_specificity_v2 --env-file .env
-uv run python -m experiments.direct_reciprocity.qwen38_control first --output results/api_reproduct/results/qwen3_8/off --source results/api_reproduct/results/feedback_specificity_v2 --env-file .env
-uv run python -m experiments.direct_reciprocity.qwen38_control all --output results/api_reproduct/results/qwen3_8/off --source results/api_reproduct/results/feedback_specificity_v2 --workers 12 --api-workers 8 --env-file .env
-uv run python -m experiments.direct_reciprocity.qwen38_control prepare --output results/api_reproduct/results/qwen3_8/on --source results/api_reproduct/results/feedback_specificity_v2 --env-file .env
-uv run python -m experiments.direct_reciprocity.qwen38_control first --output results/api_reproduct/results/qwen3_8/on --source results/api_reproduct/results/feedback_specificity_v2 --env-file .env
-uv run python -m experiments.direct_reciprocity.qwen38_control all --output results/api_reproduct/results/qwen3_8/on --source results/api_reproduct/results/feedback_specificity_v2 --workers 12 --api-workers 8 --env-file .env
-uv run python results/qwen3_8/analyze.py --root results/api_reproduct/results/qwen3_8 --source results/api_reproduct/results/feedback_specificity_v2 --output-suffix _reproduct
+sh tools/generate_api.sh
 ```
 
-The `first` stage performs one of each configuration's 240 candidate requests; `all` reuses that response and completes the remaining candidates, selection and holdout evaluation. Completed directories reuse recorded responses; use a new empty workspace for another independent API experiment. New programs and numerical results may differ from the published run.
+The script generates DeepSeek OFF/ON and Qwen OFF/ON using the paper's 20 populations, 60 parents and two candidates per parent and condition: **1,200 planned API calls**, including 240 initialization calls and 960 candidate calls, before retries. ON and Qwen reuse the new OFF parents and prompts. It then runs the existing analyses and exports JSON, CSV and tables, retaining the `_reproduct` suffix for generated summaries.
 
-Generate the downstream intermediates from these new API records:
-
-```sh
-uv run python tools/analyze_population.py --work results/api_reproduct --analysis-suffix _reproduct --output results/api_reproduct/results/reciprocity_population_visuals_20260924/population_summary_reproduct.json
-uv run python tools/figures/analyze_opponent_profiles.py --work results/api_reproduct --analysis-suffix _reproduct --output results/api_reproduct/results/figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json
-uv run python tools/figures/plot_behavior_evidence.py --work results/api_reproduct --analysis-suffix _reproduct --output results/api_reproduct/results/reciprocity_population_visuals_20260924/behavior/ANALYSIS_reproduct.json
-uv run python -m experiments.direct_reciprocity.mismatch_distance --root results/api_reproduct --output-suffix _reproduct
-uv run python results/model_comparison_20260928/cross_model_summary.py --work results/api_reproduct --analysis-suffix _reproduct --output results/api_reproduct/results/model_comparison_20260928/cross_model_mainline_data_reproduct.json --csv-dir results/api_reproduct/results/model_comparison_20260928 --output-suffix _reproduct
-uv run python tools/export_paper_tables.py --work results/api_reproduct --analysis-suffix _reproduct --output results/api_reproduct/results/reproduction/tables --output-suffix _reproduct
-```
-
-These commands write new request/response records, candidate programs, selection scores and decisions, holdout measurements, and analysis/CSV/table outputs inside `results/api_reproduct/`; analysis and intermediate filenames retain the `_reproduct` suffix.
+Outputs stay in `results/api_reproduct/`, following the project's `results/` layout. An optional first argument selects another workspace, for example `sh tools/generate_api.sh results/api_reproduct_new`; start with an empty directory for independent samples. Re-running the same workspace resumes from recorded responses. New programs and results may differ from the published run.
