@@ -16,7 +16,7 @@ from .baselines import TRAIN
 from .report_assignment import derangement
 from .prompts import build_prompt
 from .run import Generator
-from .specificity_assets import (ARMS, SEEDS, RANKS, panel, probes, diagnostic_block,
+from .specificity_assets import (ARMS, SCORE_ARMS, experiment_arms, SEEDS, RANKS, panel, probes, diagnostic_block,
                                  tokenizer, probe_specs)
 
 DEFAULT_ROOT = 'results/feedback_specificity_v2'
@@ -42,10 +42,14 @@ def assets_record():
 
 
 
-def freeze(root, seeds=None, ranks=None, source=None):
+def freeze(root, seeds=None, ranks=None, source=None, arms=None):
     root = Path(root)
     if (root / 'manifest.json').exists():
-        return check_manifest(root)
+        manifest = check_manifest(root)
+        if arms is not None and list(experiment_arms(arms)) != manifest['arms']:
+            raise ValueError('Existing frozen report conditions differ')
+        return manifest
+    arms = experiment_arms(arms)
     seeds = tuple(seeds) if seeds is not None else SEEDS
     ranks = tuple(ranks) if ranks is not None else RANKS
     if not seeds or len(seeds) > 20 or len(set(seeds)) != len(seeds):
@@ -57,7 +61,7 @@ def freeze(root, seeds=None, ranks=None, source=None):
     jobs, permutations = [], {}
     for seed in seeds:
         # One random arm-to-request-position permutation per independent cluster.
-        order = list(ARMS)
+        order = list(arms)
         random.Random(seed_for('specificity-arm-assignment', seed)).shuffle(order)
         permutations[str(seed)] = order
         for rank in ranks:
@@ -67,13 +71,13 @@ def freeze(root, seeds=None, ranks=None, source=None):
                     jobs.append({'id': f'{cid}-d{draw}-pos{position}', 'context': cid,
                                  'seed': seed, 'rank': rank, 'draw': draw, 'position': position, 'arm': arm})
     # Shuffle complete parent/draw blocks, preserving randomized positions within blocks.
-    blocks = [jobs[i:i + len(ARMS)] for i in range(0, len(jobs), len(ARMS))]
+    blocks = [jobs[i:i + len(arms)] for i in range(0, len(jobs), len(arms))]
     random.Random(2026091901).shuffle(blocks)
     jobs = [job for block in blocks for job in block]
     random.Random(2026091902).shuffle(init_jobs)
     manifest = {'version': 'specificity-v2', 'implementation_hash': implementation_hash(),
                 'engine_hash': implementation_hash(), 'provider': 'deepseek', 'model': 'deepseek-flash',
-                'config': asdict(cfg_for(seeds[0])), 'seeds': list(seeds), 'arms': list(ARMS),
+                'config': asdict(cfg_for(seeds[0])), 'seeds': list(seeds), 'arms': list(arms),
                 'ranks': list(ranks), 'draws': 2, 'init_jobs': init_jobs, 'jobs': jobs,
                 'arm_position_permutations': permutations, 'assets': assets_record(),
                 'primary': 'raw_H_default_gain_accurate_minus_mismatched',
@@ -92,8 +96,10 @@ def freeze(root, seeds=None, ranks=None, source=None):
         origin = read_json(source / 'manifest.json')
         if not set(seeds) <= set(origin['seeds']) or not set(ranks) <= set(origin['ranks']):
             raise ValueError('Requested populations/parents are absent from the source')
-        if origin['arms'] != list(ARMS) or origin['draws'] != 2:
-            raise ValueError('Source report conditions or candidate budget differ')
+        expected_config = dict(manifest['config'])
+        expected_config['seed'] = origin['config']['seed']
+        if origin['config'] != expected_config:
+            raise ValueError('Source initialization configuration differs')
         files = ['manifest.json'] + [f'populations/s{seed}.json' for seed in seeds]
         files += [f"{folder}/{job['id']}.json" for folder in ('initial', 'requests_initial') for job in init_jobs]
         manifest['initial_source'] = Path(os.path.relpath(source, root.resolve())).as_posix()
@@ -203,7 +209,8 @@ def make_contexts(root, manifest):
             correct = diagnostic_block(data['diagnostics'][slot])
             wrong = diagnostic_block(data['diagnostics'][donor])
             count = len(enc.encode(correct))
-            blocks = {'accurate': correct, 'mismatched': wrong}
+            arms = experiment_arms(manifest['arms'])
+            blocks = {arm: {'accurate': correct, 'mismatched': wrong, 'score': ''}[arm] for arm in arms}
             lengths = {arm: len(enc.encode(block)) for arm, block in blocks.items()}
             if any(not .95 <= lengths[a] / count <= 1.05 for a in ARMS):
                 raise RuntimeError('Length control failed before candidate generation')
@@ -216,7 +223,7 @@ def make_contexts(root, manifest):
             c = {'id': cid, 'seed': seed, 'rank': rank, 'slot': slot, 'donor': donor,
                  'parent': asdict(pop[slot]), 'block_tokens': lengths,
                  'effective_mismatch': correct != wrong,
-                 'prompts': {arm: base + '\n' + blocks[arm] + '\nReturn only the new strategy source.\n' for arm in ARMS}}
+                 'prompts': {arm: base + '\n' + blocks[arm] + '\nReturn only the new strategy source.\n' for arm in arms}}
             write_json(root / 'contexts' / (cid + '.json'), c)
             contexts[cid] = c
     return contexts
@@ -347,7 +354,7 @@ def seal_selections(root, manifest, *, readonly=False):
         for rank in manifest['ranks']:
             cid = f's{seed}-rank{rank}'
             parent = read_json(root / 'selection_scores' / (cid + '.json'))
-            for arm in ARMS:
+            for arm in experiment_arms(manifest['arms']):
                 jobs = sorted([j for j in manifest['jobs'] if j['context'] == cid and j['arm'] == arm], key=lambda j: j['draw'])
                 children = [(read_json(root / 'candidates' / (j['id'] + '.json')),
                              read_json(root / 'selection_scores' / (j['id'] + '.json'))) for j in jobs]
@@ -422,17 +429,18 @@ def main():
     parser.add_argument('--seeds', nargs='+', type=int, help='Population seeds to freeze; defaults to the paper batch.')
     parser.add_argument('--ranks', nargs='+', type=int, choices=RANKS, help='Parent ranks to freeze; defaults to 1, 3, 6.')
     parser.add_argument('--source', type=Path, help='Reuse recorded initial populations in place; only candidate generation calls the API.')
+    parser.add_argument('--arms', nargs='+', choices=SCORE_ARMS, help='Freeze accurate mismatched, optionally followed by score.')
     args = parser.parse_args()
     if min(args.workers, args.api_workers) < 1:
         parser.error('Worker counts must be positive')
     root = Path(args.output)
     root.mkdir(parents=True, exist_ok=True)
     if args.stage == 'freeze':
-        manifest = freeze(root, args.seeds, args.ranks, args.source)
+        manifest = freeze(root, args.seeds, args.ranks, args.source, args.arms)
         print(json.dumps({'frozen': manifest['implementation_hash'], 'requests': manifest['requested_calls']['total']}))
         return
-    if args.seeds is not None or args.ranks is not None or args.source is not None:
-        parser.error('--seeds, --ranks and --source belong to the freeze stage')
+    if args.seeds is not None or args.ranks is not None or args.source is not None or args.arms is not None:
+        parser.error('--seeds, --ranks, --source and --arms belong to the freeze stage')
     manifest = check_manifest(root)
     from dotenv import load_dotenv
     load_dotenv(args.env_file, override=False)

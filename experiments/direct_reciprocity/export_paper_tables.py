@@ -51,7 +51,17 @@ def main():
          [['two D TFT', 3, 2, 'Copy previous action'], ['five D GTFT', 9, 5, 'Copy with forgiveness 0.15'],
           ['three D ALLC', 6, 3, 'Always C'], ['sustained D', 5, 35, 'D to horizon'],
           ['periodic D', 4, '---', 'First 2 of every 7 steps D']])
-    print('Exported current supplementary tables S1-S5 as CSV and TeX')
+    manifest = json.loads((a.work / 'results/feedback_specificity_v2/manifest.json').read_text(encoding='utf-8-sig'))
+    if 'score' in manifest['arms']:
+        score = read('results/model_comparison_20260928/score_baseline_data.json')['configurations']
+        emit('tableS6_score_baseline', ['Configuration', 'Raw contrast', 'Mean [95 percent interval]'],
+             [[config, arm.title() + ' - Score', ci(data['comparisons']['raw'][arm + '_minus_score'])]
+              for config, data in score.items() for arm in ('accurate', 'mismatched')])
+        emit('tableS7_score_failures', ['Configuration', 'Candidates', 'Invalid', 'H default', 'H noise', 'H long', 'Behaviour'],
+             [[config, data['candidates'], data['invalid'], *[data['fallbacks'][setting] for setting in ('default', 'noise01', 'long', 'behavior')]]
+              for config, data in score.items()])
+    last = 'S7' if 'score' in manifest['arms'] else 'S5'
+    print(f'Exported current supplementary tables S1-{last} as CSV and TeX')
 
 
 if __name__ == '__main__':

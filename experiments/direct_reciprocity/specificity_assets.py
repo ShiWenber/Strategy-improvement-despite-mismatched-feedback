@@ -5,6 +5,16 @@ from .baselines import policy
 from .core import RandomView, act, seed_for
 
 ARMS = ('accurate', 'mismatched')
+SCORE_ARMS = ARMS + ('score',)
+
+
+def experiment_arms(arms=None):
+    """Keep the matching contrast in every batch, with an optional Score baseline."""
+    arms = tuple(ARMS if arms is None else arms)
+    if arms not in (ARMS, SCORE_ARMS):
+        raise ValueError('Use accurate mismatched, optionally followed by score')
+    return arms
+
 FAMILIES = ('recovery', 'exploitation', 'random', 'memory')
 SEEDS = tuple(range(200, 220))
 RANKS = (1, 3, 6)

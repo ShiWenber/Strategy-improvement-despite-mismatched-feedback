@@ -44,11 +44,13 @@ def main():
     data = {}
     for label, run in RUNS.items():
         path = ROOT / 'results' / run
-        candidates = [read(p) for p in sorted((path/'candidates').glob('*.json'))]
+        manifest = read(path / 'manifest.json')
+        candidates = [read(path / 'candidates' / (job['id'] + '.json'))
+                      for job in sorted(manifest['jobs'], key=lambda j: j['id']) if job['arm'] in ARMS]
         rows = [read(path/'holdout'/f'{c["id"]}.json') for c in candidates]
         assert len(rows) == 240 and sorted(set(r['seed'] for r in rows)) == SEEDS
         byid = {r['id']: r for r in rows}
-        sealed = [s for s in read(path/'SELECTIONS_SEALED.json')['rows'] if s['rule'] == 'S3']
+        sealed = [s for s in read(path/'SELECTIONS_SEALED.json')['rows'] if s['rule'] == 'S3' and s['arm'] in ARMS]
         assert len(sealed) == 120
         chosen = [{'seed': s['seed'], 'arm': s['arm'], 'accepted': s['accepted'],
                    'context': s['context'], 'winner': s['winner'],

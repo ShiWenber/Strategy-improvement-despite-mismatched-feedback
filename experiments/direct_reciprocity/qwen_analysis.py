@@ -14,10 +14,12 @@ from .qwen38_control import SOURCE, specification
 from .records import read_json, write_json
 from .specificity_analysis import contrast, holm
 from .thinking_control_analysis import aggregate
+from .restore_score import verify_restoration
 
 
 def audit(root, manifest, source=SOURCE):
     root = Path(root)
+    verify_restoration(root)
     read_json(root / 'COMPLETE.json')
     selections = read_json(root / 'SELECTIONS_SEALED.json')
     release = read_json(root / 'H_RELEASED.json')

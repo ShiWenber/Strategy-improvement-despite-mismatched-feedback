@@ -94,11 +94,11 @@ def load_regime(root):
             cid = f's{seed}-rank{rank}'
             contexts[cid] = read_json(root / 'contexts' / (cid + '.json'))
     holdout = {}
-    for path in (root / 'holdout').glob('*.json'):
-        record = read_json(path)
-        if 'arm' in record and 'delta' in record:
+    for job in manifest['jobs']:
+        if job['arm'] in ARMS:
+            record = read_json(root / 'holdout' / (job['id'] + '.json'))
             holdout[record['id']] = record
-    selections = read_json(root / 'SELECTIONS_SEALED.json')['rows']
+    selections = [r for r in read_json(root / 'SELECTIONS_SEALED.json')['rows'] if r['arm'] in ARMS]
     return {'root': root, 'manifest': manifest, 'seeds': seeds, 'populations': populations,
             'contexts': contexts, 'holdout': holdout, 'selections': selections}
 
