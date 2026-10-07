@@ -1,6 +1,6 @@
 """Shared presentation conventions for the manuscript Results figure set.
 
-Rendering only: English text, letter-only panel headings, and independent
+Rendering only: English text, descriptive panel headings, and independent
 legends inside lettered panels. Interval definitions belong in captions.
 """
 from matplotlib.lines import Line2D
@@ -41,13 +41,13 @@ def apply_style():
         'savefig.dpi':300})
 
 def panel_title(ax, letter, title='', pad=8, **kwargs):
-    assert not title, 'Move descriptive panel titles into the caption.'
-    return ax.set_title(f'({letter})',loc='left',fontweight='bold',
+    assert title.strip(), 'Each lettered panel needs a descriptive title.'
+    return ax.set_title(f'({letter}) {title}',loc='left',fontweight='bold',
                         fontsize=PANEL_FONT,pad=pad,**kwargs)
 
 def panel_heading(fig, letter, title, x, y, **kwargs):
-    assert not title, 'Move descriptive panel titles into the caption.'
-    text = f'({letter})'
+    assert title.strip(), 'Each lettered panel needs a descriptive title.'
+    text = f'({letter}) {title}'
     return fig.text(x,y,text,ha='left',va='bottom',
                     fontsize=PANEL_FONT,fontweight='bold',**kwargs)
 

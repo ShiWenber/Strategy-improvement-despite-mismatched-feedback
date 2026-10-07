@@ -30,7 +30,7 @@ def generation_figure(populations,display,args):
   bars=display['histograms'][mode]
   ax.bar([b['left'] for b in bars],[b['height'] for b in bars],width=[b['right']-b['left'] for b in bars],align='edge',color=COLORS[i],alpha=.12,edgecolor=COLORS[i],linewidth=.35,zorder=1)
   curve=np.asarray(display['density_curves'][mode]);ax.plot(curve[:,0],curve[:,1],color=COLORS[i],lw=1.6,ls=('-', '-.')[i],zorder=3)
- ax.axvline(0,ls=':',color=GREY,lw=.8);ax.set(xlim=(-.25,.5),ylim=(0,display['ymax']*1.35),xlabel='Raw payoff gain per round',ylabel='Density');ax.set_xticks([-.2,0,.2,.4]);ax.yaxis.set_major_locator(MaxNLocator(4));ax.grid(axis='y',alpha=.16);panel_title(ax,'a')
+ ax.axvline(0,ls=':',color=GREY,lw=.8);ax.set(xlim=(-.25,.5),ylim=(0,display['ymax']*1.35),xlabel='Raw payoff gain per round',ylabel='Density');ax.set_xticks([-.2,0,.2,.4]);ax.yaxis.set_major_locator(MaxNLocator(4));ax.grid(axis='y',alpha=.16);panel_title(ax,'a','Before selection')
  handles=[(Patch(facecolor=COLORS[i],alpha=.15),Line2D([],[],color=COLORS[i],ls=('-', '-.')[i],lw=1.5)) for i in range(2)]
  panel_legend(ax,handles,['OFF','ON'],ncol=2,handler_map={tuple:HandlerTuple(ndivide=None,pad=.12)})
  ax=fig.add_subplot(grid[0,1]);jitter=np.linspace(-.045,.045,20)
@@ -40,7 +40,7 @@ def generation_figure(populations,display,args):
   for xx,vals,stage,meanfield in [(left,raw,'Raw','mean_raw'),(right,selected,'S3','mean_s3')]:
    ax.scatter(xx+jitter,vals,s=17,facecolors='white' if stage=='Raw' else COLORS[i],edgecolors=COLORS[i],marker='o' if stage=='Raw' else 's',linewidth=.65,alpha=.9,zorder=2)
    ax.plot([xx-.18,xx+.18],[row[meanfield]]*2,color=DARK,lw=2,zorder=3)
- ax.axhline(0,color=GREY,ls=':',lw=.8);ax.set_xticks([0,1,3,4],['Raw\nOFF','S3\nOFF','Raw\nON','S3\nON']);ax.set(xlim=(-.48,4.48),ylim=(-.065,.25),ylabel='Population mean payoff gain');ax.grid(axis='y',alpha=.16);ax.yaxis.set_major_locator(MaxNLocator(5));panel_title(ax,'b')
+ ax.axhline(0,color=GREY,ls=':',lw=.8);ax.set_xticks([0,1,3,4],['Raw\nOFF','S3\nOFF','Raw\nON','S3\nON']);ax.set(xlim=(-.48,4.48),ylim=(-.065,.25),ylabel='Population mean payoff gain');ax.grid(axis='y',alpha=.16);ax.yaxis.set_major_locator(MaxNLocator(5));panel_title(ax,'b','Same candidate pools')
  panel_legend(ax,[Line2D([],[],marker='o',mfc='white',mec=DARK,ls='none'),Line2D([],[],marker='s',color=DARK,ls='none'),Line2D([],[],color=GREY,alpha=.5,lw=.9),Line2D([],[],color=DARK,lw=2)],['Raw','S3','Population pair','Mean'],ncol=2)
  ax=fig.add_subplot(grid[1,:]);ax.set_position([.21,.13,.755,.265]);states=[('Retained','s3_retained_parent','#C8C8C8',''),('Selected: H > 0','s3_accepted_test_better',GREEN,''),('Selected: H < 0','s3_accepted_test_worse',ORANGE,'///')]
  for i,mode in enumerate(MODES):
@@ -48,7 +48,7 @@ def generation_figure(populations,display,args):
   for name,key,color,hatch in states:
    n=row[key];ax.barh(i,n,left=offset,color=color,edgecolor='white',linewidth=.8,height=.48,hatch=hatch);ax.text(offset+n/2,i,str(n),ha='center',va='center',fontsize=8.5,color='white' if key=='s3_accepted_test_better' else DARK,bbox={'facecolor':color,'edgecolor':'none','pad':.25});offset+=n
   assert offset==120
- ax.set_yticks([0,1],MODES);ax.set(xlim=(0,120),ylim=(1.67,-.95),xlabel='Fixed candidate pools (120 per mode)');ax.set_xticks([0,30,60,90,120]);ax.tick_params(axis='y',length=0,pad=8);ax.spines['left'].set_visible(False);panel_title(ax,'c')
+ ax.set_yticks([0,1],MODES);ax.set(xlim=(0,120),ylim=(1.67,-.95),xlabel='Fixed candidate pools (120 per mode)');ax.set_xticks([0,30,60,90,120]);ax.tick_params(axis='y',length=0,pad=8);ax.spines['left'].set_visible(False);panel_title(ax,'c','S3 decisions and independent H outcomes')
  panel_legend(ax,[Patch(facecolor=c,hatch=h,edgecolor='white') for _,_,c,h in states],[s[0] for s in states],ncol=3)
  labels=[t.get_text() for ax in fig.axes for t in ax.get_legend().get_texts()]
  record=render_audit(fig,'figS2',[args.input,args.display_output],__file__,labels,['OFF/ON compound keys each show the histogram fill and the density curve.','Histogram heights and Gaussian KDE curves are read from the existing display cache.','Existing across-population means are read from mean_raw and mean_s3.'],output_dir=args.output_dir,audit_dir=args.audit_dir);plt.close(fig);return record

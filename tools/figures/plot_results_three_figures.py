@@ -157,9 +157,9 @@ def figure2(cross, pairs):
     axb.set_xticks([-0.02, 0, 0.02])
     axb.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f'{x:.2f}'))
     axb.set_xlabel('Raw Accurate − Mismatched\n(payoff per round)')
-    headings = [panel_heading(fig, 'a', '', 0.025, 0.947),
-                panel_heading(fig, 'b', '', 0.535, 0.947),
-                panel_heading(fig, 'c', '', 0.025, 0.470)]
+    headings = [panel_heading(fig, 'a', 'Mismatched: gains over parents', 0.025, 0.947),
+                panel_heading(fig, 'b', 'Correct report matching', 0.535, 0.947),
+                panel_heading(fig, 'c', 'Same-pool selection: S3 above Raw in 79 of 80 population pairs', 0.025, 0.470)]
     axb.text(1, 1.01, 'Accurate higher →', transform=axb.transAxes, ha='right', fontsize=8.5, color='#505050')
     lefts = [0.165, 0.3775, 0.59, 0.8025]
     for i, (cell, left) in enumerate(zip(ORDER, lefts)):
@@ -210,8 +210,8 @@ def figure3(opponents, behavior):
     family_names = ['Recovery', 'Exploitation', 'Random', 'Memory-one']
     ypos = [3, 2, 1, 0]
     for panel, stage, bottom, heading_y, legend_bottom, title in [
-        ('a', 'raw', 0.745, 0.970, 0.937, ''),
-        ('b', 'S3', 0.435, 0.675, 0.642, ''),
+        ('a', 'raw', 0.745, 0.970, 0.937, 'Raw candidates'),
+        ('b', 'S3', 0.435, 0.675, 0.642, 'S3 outputs'),
     ]:
         # Separate thinking modes into aligned columns, leaving only four
         # opponent-family rows in each plotting area.
@@ -265,7 +265,7 @@ def figure3(opponents, behavior):
         ax.set_yticks([0, 5, 10, 15, 20])
         ax.set_ylabel(ylabel)
         clean(ax, 'y', zero=False)
-        headings.append(panel_heading(fig, panel, '', left - 0.025, 0.321))
+        headings.append(panel_heading(fig, panel, title, left - 0.025, 0.321))
         legend_specs.append((panel, ax,
             [Line2D([], [], color=DARK, marker='o', lw=1, linestyle='-'),
              Line2D([], [], color=DARK, marker='^', markerfacecolor='white', lw=1, linestyle='--'),
@@ -341,7 +341,8 @@ def save(fig, directory, stem):
             'handles': item['entries'], 'overlapping_headings': overlaps,
             'overlapping_data': data_overlaps})
     assert all(t.get_fontsize() == 9.5 and t.get_fontweight() == 'bold' and t.get_ha() == 'left' for t in meta['panel_headings'])
-    assert [t.get_text() for t in meta['panel_headings']] == [f'({p})' for p in expected_panels]
+    assert all(t.get_text().startswith(f'({p}) ') and t.get_text()[4:].strip()
+               for t, p in zip(meta['panel_headings'], expected_panels))
     directory.mkdir(parents=True, exist_ok=True)
     exports = {}
     for extension in ['pdf', 'svg', 'png']:

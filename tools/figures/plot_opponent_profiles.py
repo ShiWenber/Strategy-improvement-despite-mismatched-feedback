@@ -31,7 +31,7 @@ for row,stage in enumerate(['raw','S3']):
    ax.barh(np.arange(4)+off,means,height=.28,color=colors[arm],alpha=.8,edgecolor='white',lw=.35,hatch='///' if arm=='mismatched' else None,zorder=3)
    ax.errorbar(means,np.arange(4)+off,xerr=np.vstack([means-ci[:,0],ci[:,1]-means]),fmt='none',ecolor=colors[arm],elinewidth=.85,capsize=2,capthick=.8,zorder=4)
   ax.set_yticks(range(4),labels);ax.set(ylim=(3.55,-1.2),xlim=(-.175,.23));ax.set_xticks([-.1,0,.1,.2],['−0.1','0','+0.1','+0.2']);ax.tick_params(axis='y',length=0,pad=8);ax.tick_params(axis='x',length=3,labelbottom=True)
-  panel_title(ax,'abcd'[row*2+col])
+  panel_title(ax,'abcd'[row*2+col],('Raw' if stage=='raw' else 'S3')+': '+('Thinking OFF' if mode=='non_thinking' else 'Thinking ON'))
   ax.set_xlabel('Payoff gain per round\nvs parent')
   panel_legend(ax,[Patch(facecolor=BLUE,alpha=.8),Patch(facecolor=ORANGE,alpha=.8,hatch='///',edgecolor='white')],['Accurate','Mismatched'],ncol=2)
 legendlabels=['Accurate','Mismatched']
