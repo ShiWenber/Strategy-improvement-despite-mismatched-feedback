@@ -1,15 +1,15 @@
 import unittest
 from unittest.mock import patch
 from experiments.direct_reciprocity.core import Config, Policy, PolicyError
-from tools.direct_reciprocity.recover_evaluation import tolerate_holdout_failure
+from experiments.direct_reciprocity.recover_evaluation import tolerate_holdout_failure
 
 
 class EvaluationRecoveryTests(unittest.TestCase):
     def test_analysis_reports_missing_tests_without_zero_imputation(self):
         import tempfile
         from pathlib import Path
-        from tools.direct_reciprocity.records import write_json
-        from tools.direct_reciprocity.analyze import summarize
+        from experiments.direct_reciprocity.records import write_json
+        from experiments.direct_reciprocity.analyze import summarize
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             cells = [{'seed': 0, 'prompt': p, 'selection': 'paper_truncation'} for p in ('minimal', 'score')]
@@ -43,7 +43,7 @@ class EvaluationRecoveryTests(unittest.TestCase):
         # Asserted by value, not identity: returning a semantically equal copy is
         # fine, silently mutating or annotating the payload is not.
         expected = {'score': 300, 'cooperation': 1, 'worst_score': 300}
-        with patch('tools.direct_reciprocity.recover_evaluation.versus', return_value=expected) as original:
+        with patch('experiments.direct_reciprocity.recover_evaluation.versus', return_value=expected) as original:
             actual = tolerate_holdout_failure(self.policy, [], Config(), 'holdout-long', 6)
         self.assertEqual(actual, expected)
         self.assertNotIn('status', actual)
@@ -51,7 +51,7 @@ class EvaluationRecoveryTests(unittest.TestCase):
         original.assert_called_once_with(self.policy, [], Config(), 'holdout-long', 6)
 
     def test_failure_is_missing_not_zero_or_success(self):
-        with patch('tools.direct_reciprocity.recover_evaluation.versus', side_effect=PolicyError('budget')):
+        with patch('experiments.direct_reciprocity.recover_evaluation.versus', side_effect=PolicyError('budget')):
             result = tolerate_holdout_failure(self.policy, [], Config(), 'holdout-long', 6)
         self.assertEqual(result['status'], 'runtime_failure')
         self.assertIsNone(result['score'])
@@ -61,6 +61,6 @@ class EvaluationRecoveryTests(unittest.TestCase):
     def test_training_failures_and_programming_errors_propagate(self):
         for error, phase in [(PolicyError('budget'), 'archive'), (PolicyError('budget'), 'fixed'),
                              (ValueError('bug'), 'holdout-long')]:
-            with patch('tools.direct_reciprocity.recover_evaluation.versus', side_effect=error):
+            with patch('experiments.direct_reciprocity.recover_evaluation.versus', side_effect=error):
                 with self.assertRaises(type(error)):
                     tolerate_holdout_failure(self.policy, [], Config(), phase)

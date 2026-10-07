@@ -8,21 +8,18 @@ from collections import defaultdict
 import argparse
 import json
 from pathlib import Path
+from ..records import read_json
 from statistics import mean
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 FAMILIES = ["recovery", "exploitation", "random", "memory"]
 ARMS = ["accurate", "mismatched"]
 SEEDS = list(range(200, 220))
 STAGES = ["raw", "S3"]
 BOOTSTRAP_SEED = 2026092604
 N_BOOTSTRAP = 20000
-
-
-def read(path):
-    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def main():
@@ -87,9 +84,9 @@ def main():
         ("thinking", "feedback_specificity_thinking_384k_20260923"),
     ]:
         source = work / "results" / run
-        manifest = read(source / "manifest.json")
-        sealed = read(source / "SELECTIONS_SEALED.json")
-        frozen = read(source / f"ANALYSIS{args.analysis_suffix}.json")
+        manifest = read_json(source / "manifest.json")
+        sealed = read_json(source / "SELECTIONS_SEALED.json")
+        frozen = read_json(source / f"ANALYSIS{args.analysis_suffix}.json")
         expected = frozen["thinking"] if mode == "thinking" else frozen
         selection = {
             (row["context"], row["arm"]): row
@@ -105,9 +102,9 @@ def main():
         max_family_error = 0.0
         for (context, arm), jobs in sorted(grouped.items()):
             assert len(jobs) == 2
-            parent = read(source / "holdout" / (context + ".json"))["measured"]["default"]
+            parent = read_json(source / "holdout" / (context + ".json"))["measured"]["default"]
             children = {
-                job["id"]: read(source / "holdout" / (job["id"] + ".json"))
+                job["id"]: read_json(source / "holdout" / (job["id"] + ".json"))
                 for job in jobs
             }
             winner = selection[context, arm]["winner"]

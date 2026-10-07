@@ -9,7 +9,7 @@ import json
 import os
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 ROOT = REPO / 'results' / 'feedback_specificity_v2'
 OUT = REPO / 'reproduct'
 FIGURES = {3: 'figS1', 4: 'figS5', 5: 'figS3'}
@@ -20,8 +20,8 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 from matplotlib.text import Text
 from matplotlib.lines import Line2D
-from results_plot_style import apply_style, panel_title, panel_legend
-from results_plot_audit import render_audit
+from .results_plot_style import apply_style, panel_title, panel_legend
+from .results_plot_audit import render_audit
 import numpy as np
 
 ARMS = ('accurate', 'mismatched')

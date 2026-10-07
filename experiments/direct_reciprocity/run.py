@@ -10,9 +10,9 @@ import time
 from .core import Config, Policy, evaluate, ranking, update_archive, versus, match
 from .baselines import TRAIN, TEST
 from .diagnostics import population_behavior
-from tools.direct_reciprocity.records import (read_json, write_json, initial_identity, request_budget,
+from .records import (read_json, write_json, initial_identity, request_budget,
                                              configure_run, config_digest, cached_request, begin_request)
-from tools.direct_reciprocity.reuse import reuse_initial
+from .reuse import reuse_initial
 from .selection import selection_plan
 from .prompts import build_prompt
 from ..config.load_env import get_api_key, get_base_url, get_model
@@ -185,7 +185,7 @@ def main():
                population_size=args.population_size,eliminate=args.eliminate,rounds=args.rounds,repeats=args.repeats)
     model=get_model(args.provider,args.model)
     if args.matrix:
-        from tools.direct_reciprocity.matrix import run_matrix
+        from .matrix import run_matrix
         return run_matrix(args,model)
     if args.dry_run:
         print(json.dumps({'config':asdict(cfg),'model':model,'provider':args.provider,

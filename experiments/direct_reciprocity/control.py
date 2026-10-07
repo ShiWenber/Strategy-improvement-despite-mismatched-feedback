@@ -5,11 +5,11 @@ from pathlib import Path
 from statistics import mean
 from .core import Config, Policy, match, seed_for, versus, ranking
 from .baselines import TRAIN, TEST
-from tools.direct_reciprocity.recover_evaluation import tolerate_holdout_failure
+from .recover_evaluation import tolerate_holdout_failure
 from .prompts import build_prompt
 from .run import Generator
-from tools.direct_reciprocity.records import read_json, write_json
-from tools.direct_reciprocity.records import check_implementation, request_budget
+from .records import read_json, write_json
+from .records import check_implementation, request_budget
 
 
 def hypothetical_fitness(candidate, slot, population, archive, cfg, generation):
@@ -168,7 +168,7 @@ def main():
     else:
         if args.seed is None or args.seeds is not None:
             parser.error('Final control evaluation requires one --seed')
-        from tools.direct_reciprocity.process_lock import seed_lock
+        from .process_lock import seed_lock
         with seed_lock(args.root, args.seed):
             run_control(args.root,args.seed,args.available_only,args.evaluation_workers)
 

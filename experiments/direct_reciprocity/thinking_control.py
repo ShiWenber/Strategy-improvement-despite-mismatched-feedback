@@ -8,7 +8,7 @@ import traceback
 from .core import Policy, match
 from .baselines import TRAIN
 from .specificity import cfg_for
-from tools.direct_reciprocity.records import read_json, write_json, cached_request, begin_request
+from .records import read_json, write_json, cached_request, begin_request
 
 SOURCE = Path('results/feedback_specificity_v2')
 DEFAULT_ROOT = Path('results/feedback_specificity_thinking_384k_20260923')
