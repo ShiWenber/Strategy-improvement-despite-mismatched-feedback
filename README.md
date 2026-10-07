@@ -4,9 +4,7 @@ This repository accompanies *Strategy improvement despite mismatched feedback: e
 
 The paper compares **Accurate** and **Mismatched** reports while holding the parent strategy, population code, game rules and genuine training scores fixed. Accurate supplies the parent's own numerical behavioural report; Mismatched supplies another strategy's report from the same population. Candidate quality before selection is evaluated separately from the quality of externally selected outputs.
 
-Only the English manuscript and its electronic supplementary material are maintained, in the local `paper_interface_focus/` project. Their figure inputs are under `paper_interface_focus/figures/`; `paper_interface_focus/tools/build.ps1` builds both documents.
-
-## Reproduce with uv
+## Run with uv
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and Git, then run these commands from the project root:
 
