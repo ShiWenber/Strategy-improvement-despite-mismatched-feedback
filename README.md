@@ -52,6 +52,7 @@ Paths are relative to each experiment directory unless stated otherwise. ON and 
 | `holdout/<id>.json` | Payoff and independent behaviour measurements and gains over parents |
 | `ANALYSIS.json`, `AUDIT.json` | Reference analysis summaries |
 | `SCORE_RESTORE.json` | Historical source identity, imported Score paths and byte hashes of raw records; bound to the manifest |
+| `arm_logs/score.jsonl`, `arm_logs/accurate.jsonl`, `arm_logs/mismatched.jsonl` | One consolidated data log per condition and model/configuration: task identity, complete request/response, usage, candidate validity, selection scores, holdout data and original record hashes |
 
 ## Reproduce each analysis
 
@@ -153,3 +154,24 @@ sh experiments/direct_reciprocity/generate_api.sh --with-score
 The default script generates two conditions: **1,200 planned API calls**, including 240 initialization calls and 960 candidate calls, before retries. `--with-score` generates three conditions: **1,680 planned API calls**, including the same 240 initialization calls and 1,440 candidate calls. ON and Qwen reuse the new OFF parents and prompts. It then runs the analyses and exports JSON, CSV and tables, retaining the `_reproduct` suffix for generated summaries. The individual freeze command supports `--arms accurate mismatched score`; omitting `--arms` keeps the two-condition default.
 
 Outputs stay in `results/api_reproduct/`, or `results/api_reproduct_score/` with Score. An optional workspace argument follows the flag, for example `sh experiments/direct_reciprocity/generate_api.sh --with-score results/api_reproduct_new`; start with an empty directory for independent samples. Re-running the same workspace resumes from recorded responses, and rejects a change in the frozen condition set. New programs and results may differ from the published run.
+
+Within **each model/configuration**, new candidate requests now complete **all Score**, then **all Accurate**, then **all Mismatched**. When Score is absent, Accurate precedes Mismatched. `--api-workers` controls concurrency within a condition; the next condition starts only after all active requests in the previous condition finish. An API error stops the batch and prevents later conditions from starting. Parent and draw order is shared across conditions and shuffled within each condition. The frozen manifest records `generation_order` and the new dispatch protocol; historical collection times, IDs and scheduling records remain intact. Fixed condition order is associated with collection time, so new runs use a different scheduling design from the historical randomized collection.
+
+The common `generate_candidate(root, job, arm, provider=..., mode=...)` function selects the condition's frozen prompt, sends the request and writes the candidate. `generate_arm(root, manifest, arm, workers, generate_one)` runs a complete condition through the same implementation. DeepSeek ON and both Qwen modes share one streaming transport; the existing DeepSeek OFF generator retains its durable request cache. Provider settings and frozen request fingerprints are preserved.
+
+The `generate` stage accepts `--arm` to run one condition, and checks that earlier conditions are complete:
+
+```sh
+uv run python -m experiments.direct_reciprocity.specificity generate --output results/api_reproduct_score/results/feedback_specificity_v2 --arm score --env-file .env
+uv run python -m experiments.direct_reciprocity.paired_control generate --provider qwen --output results/api_reproduct_score/results/qwen3_8/off --source results/api_reproduct_score/results/feedback_specificity_v2 --arm score --env-file .env
+```
+
+Paired generation uses the existing `prepare` and `first` checks before `generate` or `all`. The first check sends a request from the first condition, which is Score in a three-condition run.
+
+Each condition's JSONL log is created at freeze/prepare time. Completed requests append snapshots, including failures and resumed responses; batch completion or failure compacts the log to exactly one row per frozen task, with pending tasks marked `pending`. Selection and holdout stages refresh these same files. Per-request JSON and stream files remain the durable originals used by analyses; uncertain requests are never retried automatically.
+
+Rebuild condition logs from existing records at any time, without API calls or changing recorded data:
+
+```sh
+uv run python -m experiments.direct_reciprocity.condition_generation --roots results/feedback_specificity_v2 results/feedback_specificity_thinking_384k_20260923 results/qwen3_8/off results/qwen3_8/on
+```
