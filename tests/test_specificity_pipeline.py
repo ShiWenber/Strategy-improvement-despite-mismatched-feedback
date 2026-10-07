@@ -16,18 +16,14 @@ from experiments.direct_reciprocity.records import write_json, read_json
 from experiments.direct_reciprocity.specificity_assets import probes, ARMS, SCORE_ARMS
 
 
-class FakeGenerator:
-    def __init__(self, directory, provider, model, temperature):
-        self.directory = Path(directory)
-
-    def generate(self, identity, prompt, cfg):
-        # A higher selection score deliberately accompanies a worse held-out payoff.
-        p = Policy(identity, TRAIN[1 if '-d0-' in identity else 0].code)
-        write_json(self.directory / (identity + '.json'), {
-            'prompt': prompt, 'status': 'valid', 'started_at': time.time(),
-            'code_hash': p.key, 'returned_model': 'offline-synthetic-fixture',
-            'usage': {'total_tokens': 0, 'prompt_tokens': 0, 'completion_tokens': 0}})
-        return p
+def synthetic_generate(self, identity, prompt, cfg):
+    # A higher selection score deliberately accompanies a worse held-out payoff.
+    p = Policy(identity, TRAIN[1 if '-d0-' in identity else 0].code)
+    write_json(self.directory / (identity + '.json'), {
+        'prompt': prompt, 'status': 'valid', 'started_at': time.time(),
+        'code_hash': p.key, 'returned_model': 'offline-synthetic-fixture',
+        'usage': {'total_tokens': 0, 'prompt_tokens': 0, 'completion_tokens': 0}})
+    return p
 
 
 def synthetic_selection(candidate, pop, slot, cfg):
@@ -55,7 +51,7 @@ class PipelineTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             with patch.object(runner, 'SEEDS', (901, 902)), patch.object(runner, 'RANKS', (1,)), \
-                 patch.object(runner, 'Generator', FakeGenerator), \
+                 patch.object(runner.Generator, 'generate', synthetic_generate), \
                  patch.object(runner, 'evaluate', lambda pop, archive, cfg, gen: [{'fitness': i} for i in range(len(pop))]), \
                  patch.object(runner, 'measured_selection', synthetic_selection), \
                  patch.object(runner, 'holdout_measure', synthetic_holdout):

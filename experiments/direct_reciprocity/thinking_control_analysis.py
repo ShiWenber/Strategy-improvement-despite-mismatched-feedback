@@ -12,8 +12,11 @@ from .records import digest, filehash
 from .records import read_json, write_json
 from .specificity import seal_selections
 from .specificity_analysis import contrast, summarize, holm, behavior_delta
-from .thinking_control import DEFAULT_ROOT, SOURCE, specification
+from .condition_generation import specification
 from .restore_score import verify_restoration
+
+SOURCE = Path('results/feedback_specificity_v2')
+DEFAULT_ROOT = Path('results/feedback_specificity_thinking_384k_20260923')
 
 
 def audit(root, m, source=SOURCE):
@@ -34,7 +37,7 @@ def audit(root, m, source=SOURCE):
         child = read_json(root/'candidates'/(identity+'.json'))
         row = read_json(root/'holdout'/(identity+'.json'))
         parent = read_json(root/'holdout'/(j['context']+'.json'))
-        expected = specification(c['prompts'][j['arm']])
+        expected = specification(c['prompts'][j['arm']], 'deepseek', 'on')
         if any(r.get(k) != v for k,v in expected.items()):
             issues.append(identity+': request parameters differ')
         if r.get('fingerprint') != digest(json.dumps(expected, sort_keys=True)):

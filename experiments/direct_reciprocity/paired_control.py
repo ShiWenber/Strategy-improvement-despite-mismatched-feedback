@@ -1,41 +1,42 @@
 """Prepare and dispatch paired DeepSeek ON or Qwen OFF/ON follow-up batches."""
 import argparse
+from functools import partial
 import json
 from pathlib import Path
 import shutil
 import time
 
-from experiments.direct_reciprocity import thinking_control, qwen38_control
 from .records import (read_json, write_json, digest, filehash, implementation_hash, check_manifest,
                       population_root, release_holdout, complete, runner_lock)
 from .specificity import evaluation_job, holdout_job, pool_run, seal_selections
 from .specificity_assets import SCORE_ARMS, generation_arms
-from .condition_generation import generate_conditions, first_job, write_arm_logs
+from .condition_generation import candidate_job, generate_conditions, jobs_for_arm, specification, write_arm_logs
 
 SOURCE = Path('results/feedback_specificity_v2')
 
 
 def settings(provider, root):
     if provider == 'deepseek':
-        module = thinking_control
         mode = 'on'
-        protocol = module.PROTOCOL
-        api = module.specification('')
+        protocol = Path('docs/direct_reciprocity/THINKING_384K_PROTOCOL.md')
         version = 'thinking-384k-v2'
     else:
-        module = qwen38_control
-        mode = module.mode_for(root)
-        protocol = module.DEFAULT_ROOT / 'PROTOCOL.md'
-        api = module.specification('', mode)
+        root = Path(root)
+        mode = root.name
+        if mode not in ('off', 'on') or root.parent.name != 'qwen3_8':
+            raise ValueError('Use results/qwen3_8/off or results/qwen3_8/on')
+        protocol = Path('results/qwen3_8/PROTOCOL.md')
         version = 'qwen3.8-flash-v2'
-    return module, mode, protocol, {k: v for k, v in api.items() if k != 'prompt'}, version
+    api = specification('', provider, mode)
+    api.pop('prompt')
+    return mode, protocol, api, version
 
 
 def prepare(root, source, provider):
     root, source = Path(root), Path(source)
     old = check_manifest(source)
     read_json(source / 'COMPLETE.json')
-    module, mode, protocol, api, version = settings(provider, root)
+    mode, protocol, api, version = settings(provider, root)
     if (root / 'manifest.json').exists():
         return verify(root, source, provider)
     if root.exists() and any(root.iterdir()):
@@ -79,7 +80,7 @@ def prepare(root, source, provider):
 def verify(root, source, provider):
     root, source = Path(root), Path(source)
     m = read_json(root / 'manifest.json')
-    _, mode, _, api, version = settings(provider, root)
+    mode, _, api, version = settings(provider, root)
     if m['version'] != version or m.get('mode', 'on') != mode:
         raise RuntimeError('Provider or mode identity changed')
     if m['implementation_hash'] != implementation_hash() or m['runner_hash'] != filehash(__file__):
@@ -135,12 +136,13 @@ def main():
         print(json.dumps({'prepared': str(root), 'requests': len(manifest['jobs']), 'api': manifest['api']}))
         return
     manifest = verify(root, args.source, args.provider)
-    module = settings(args.provider, root)[0]
+    generate = partial(candidate_job, provider=args.provider, mode=manifest.get('mode', 'on'))
     with runner_lock(root, args.stage):
         if args.stage == 'first':
-            job = first_job(root, manifest, args.arm)
+            arm = args.arm or generation_arms(manifest['arms'])[0]
+            job = jobs_for_arm(root, manifest, arm)[0]
             try:
-                result = module.generate_one((str(root), job))
+                result = generate((str(root), job))
             finally:
                 write_arm_logs(root, manifest)
             write_json(root / 'FIRST_REQUEST_CHECK.json', {'completed': True, 'result': result})
@@ -148,7 +150,7 @@ def main():
             return
         if args.stage in ('all', 'generate'):
             read_json(root / 'FIRST_REQUEST_CHECK.json')
-            generate_conditions(root, manifest, args.api_workers, module.generate_one, args.arm)
+            generate_conditions(root, manifest, args.api_workers, generate, args.arm)
         if args.stage in ('all', 'select'):
             verify(root, args.source, args.provider)
             for j in manifest['jobs']:

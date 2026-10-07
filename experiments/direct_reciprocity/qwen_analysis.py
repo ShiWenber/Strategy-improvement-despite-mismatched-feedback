@@ -10,11 +10,13 @@ ROOT = WORKSPACE / 'results/qwen3_8'
 
 from .core import Policy
 from .records import digest, filehash
-from .qwen38_control import SOURCE, specification
+from .condition_generation import specification
 from .records import read_json, write_json
 from .specificity_analysis import contrast, holm
 from .thinking_control_analysis import aggregate
 from .restore_score import verify_restoration
+
+SOURCE = Path('results/feedback_specificity_v2')
 
 
 def audit(root, manifest, source=SOURCE):
@@ -36,7 +38,7 @@ def audit(root, manifest, source=SOURCE):
         candidate = read_json(root / 'candidates' / (identity + '.json'))
         holdout = read_json(root / 'holdout' / (identity + '.json'))
         parent = read_json(root / 'holdout' / (job['context'] + '.json'))
-        expected = specification(context['prompts'][job['arm']], manifest['mode'])
+        expected = specification(context['prompts'][job['arm']], 'qwen', manifest['mode'])
         if any(request.get(key) != value for key, value in expected.items()):
             issues.append(identity + ': request specification differs')
         if request.get('fingerprint') != digest(json.dumps(expected, sort_keys=True)):

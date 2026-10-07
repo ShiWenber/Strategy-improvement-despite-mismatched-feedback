@@ -10,12 +10,40 @@ import pytest
 
 from experiments.direct_reciprocity import condition_generation as generation
 from experiments.direct_reciprocity import specificity
+from experiments.direct_reciprocity import run
+from experiments.direct_reciprocity.core import Config
 from experiments.direct_reciprocity.records import write_json, filehash, begin_request, digest
 from experiments.direct_reciprocity.specificity_assets import SCORE_ARMS, information_prompt
 
 
 def rows(path):
     return [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines()]
+
+
+@pytest.mark.parametrize('content,finish_reason', [
+    ('', 'stop'), ("def strategy(history, rng): return 'C'", 'length'),
+    ('invalid python!', 'stop'), ("def strategy(history, rng): return 'X'", 'stop')])
+def test_shared_validation_rejects_unusable_programs(content, finish_reason):
+    record = dict(status='received', content=content, finish_reason=finish_reason)
+    assert run.validate(record, 'fixture', Config(rounds=5)) is None
+    assert record['status'] == 'invalid' and record['validation_error']
+
+
+def test_shared_validation_accepts_fences_and_reuses_terminal_outcomes(monkeypatch):
+    code = "def strategy(history, rng):\n    return 'C'"
+    record = dict(status='received', content='```python\n' + code + '\n```', finish_reason='stop')
+    policy = run.validate(record, 'fixture', Config(rounds=5))
+    assert policy.code == code and record['status'] == 'valid' and record['code_hash'] == policy.key
+    before = record.copy()
+
+    def no_replay(*args):
+        pytest.fail('Completed program validation must not replay matches')
+
+    monkeypatch.setattr(run, 'match', no_replay)
+    assert run.validate(record, 'fixture', Config()).key == policy.key and record == before
+    invalid = dict(status='invalid', validation_error='previous failure')
+    assert run.validate(invalid, 'fixture', Config()) is None
+    assert invalid == dict(status='invalid', validation_error='previous failure')
 
 
 @pytest.fixture

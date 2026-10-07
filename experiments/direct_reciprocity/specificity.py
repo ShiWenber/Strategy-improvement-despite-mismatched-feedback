@@ -18,7 +18,7 @@ from .prompts import build_prompt
 from .run import Generator
 from .specificity_assets import (ARMS, SCORE_ARMS, experiment_arms, SEEDS, RANKS, panel, probes, diagnostic_block,
                                  tokenizer, probe_specs, generation_arms, information_prompt)
-from .condition_generation import generate_candidate, generate_conditions, write_arm_logs
+from .condition_generation import candidate_job, generate_conditions, write_arm_logs
 
 DEFAULT_ROOT = 'results/feedback_specificity_v2'
 
@@ -247,12 +247,6 @@ def make_prompts(root, manifest):
     else:
         write_json(path, sealed)
     return sealed
-
-
-
-def candidate_job(arg):
-    root, job = arg
-    return generate_candidate(root, job, job['arm'], generator_factory=Generator)
 
 
 
