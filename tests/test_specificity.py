@@ -6,7 +6,7 @@ from experiments.direct_reciprocity.core import Config, Policy
 from experiments.direct_reciprocity.baselines import TRAIN, TEST
 from experiments.direct_reciprocity.specificity_assets import (panel, probes, probe_specs, diagnostic_block, tokenizer, ARMS)
 from experiments.direct_reciprocity.specificity import choose, training_scores, holdout_job
-from experiments.direct_reciprocity.specificity_analysis import holm, sign_swap_p
+from tools.direct_reciprocity.specificity_analysis import holm, sign_swap_p
 
 
 class SpecificityTests(unittest.TestCase):

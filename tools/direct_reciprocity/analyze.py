@@ -4,7 +4,7 @@ from collections import defaultdict
 from pathlib import Path
 import random
 from statistics import mean, stdev
-from .run import read_json, write_json
+from .records import read_json, write_json
 
 
 def interval(values, repetitions=10000):

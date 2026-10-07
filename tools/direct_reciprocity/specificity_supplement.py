@@ -2,10 +2,10 @@
 from dataclasses import replace
 from pathlib import Path
 
-from .core import Policy, versus
-from .run import read_json
-from .specificity import cfg_for
-from .specificity_assets import panel
+from experiments.direct_reciprocity.core import Policy, versus
+from .records import read_json
+from experiments.direct_reciprocity.specificity import cfg_for
+from experiments.direct_reciprocity.specificity_assets import panel
 
 
 def replay_job(arg):

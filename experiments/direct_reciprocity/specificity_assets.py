@@ -1,10 +1,8 @@
 """Frozen v2 measurement assets. No test result enters generation or selection."""
-from dataclasses import asdict
-import json
 from statistics import mean
 
 from .baselines import policy
-from .core import Config, RandomView, act, seed_for
+from .core import RandomView, act, seed_for
 
 ARMS = ('accurate', 'mismatched')
 FAMILIES = ('recovery', 'exploitation', 'random', 'memory')
@@ -131,11 +129,3 @@ def diagnostic_block(diagnostics):
     for name, result in diagnostics.items():
         lines.append(name + ': ' + '; '.join(f'{key}={value:.4f}' for key, value in sorted(result['mean'].items())))
     return head + '\n'.join(lines)
-
-
-def assets_record():
-    return {'panels': {split: [{'family': family, **asdict(p)} for family, p in panel(split)]
-                       for split in ('V', 'H')},
-            'probes': {split: probe_specs(split) for split in ('F', 'H')},
-            'tokenizer': 'tiktoken cl100k_base; proxy tokenizer, not provider billing tokenizer',
-            'families_disjoint_from_training': False}

@@ -7,11 +7,12 @@ import json
 
 import numpy as np
 
-from experiments.direct_reciprocity.core import Policy, digest
-from experiments.direct_reciprocity.run import read_json, write_json
-from experiments.direct_reciprocity.specificity import seal_selections
-from experiments.direct_reciprocity.specificity_analysis import contrast, summarize, holm, behavior_delta
-from experiments.direct_reciprocity.thinking_control import DEFAULT_ROOT, SOURCE, specification, filehash
+from experiments.direct_reciprocity.core import Policy
+from .records import digest, filehash
+from .records import read_json, write_json
+from .specificity import seal_selections
+from tools.direct_reciprocity.specificity_analysis import contrast, summarize, holm, behavior_delta
+from experiments.direct_reciprocity.thinking_control import DEFAULT_ROOT, SOURCE, specification
 
 
 def audit(root, m, source=SOURCE):

@@ -1,5 +1,5 @@
 import unittest
-from experiments.direct_reciprocity.trajectory_analysis import align_pair
+from tools.direct_reciprocity.trajectory_analysis import align_pair
 
 
 class TrajectoryTests(unittest.TestCase):

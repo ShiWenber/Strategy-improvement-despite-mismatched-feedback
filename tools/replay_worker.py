@@ -14,7 +14,7 @@ def main():
     parser.add_argument('--full', action='store_true', help='Replay all default-H parent/candidate records; may take many hours')
     a = parser.parse_args()
     sys.path.insert(0, str(a.work))
-    from experiments.direct_reciprocity.specificity_supplement import replay_job
+    from tools.direct_reciprocity.specificity_supplement import replay_job
     roots = ['feedback_specificity_v2', 'feedback_specificity_thinking_384k_20260923', 'qwen3_8/off', 'qwen3_8/on']
     tasks = []
     for relative in roots:

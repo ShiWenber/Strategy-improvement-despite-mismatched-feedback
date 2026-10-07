@@ -7,25 +7,15 @@ import json
 from pathlib import Path
 import time
 
-from .core import Config, Policy, PolicyError, digest, evaluate, ranking, update_archive, versus, match
+from .core import Config, Policy, evaluate, ranking, update_archive, versus, match
 from .baselines import TRAIN, TEST
-from .diagnostics import population_behavior, request_budget, implementation_hash
-from .reuse import reuse_initial
+from .diagnostics import population_behavior
+from tools.direct_reciprocity.records import (read_json, write_json, initial_identity, request_budget,
+                                             configure_run, config_digest, cached_request, begin_request)
+from tools.direct_reciprocity.reuse import reuse_initial
 from .selection import selection_plan
 from .prompts import build_prompt
 from ..config.load_env import get_api_key, get_base_url, get_model
-
-
-def write_json(path, data):
-    path = Path(path)
-    path.parent.mkdir(parents=True,exist_ok=True)
-    temp = path.with_suffix(path.suffix+'.tmp')
-    temp.write_text(json.dumps(data,indent=2,ensure_ascii=False),encoding='utf-8')
-    temp.replace(path)
-
-
-def read_json(path):
-    return json.loads(Path(path).read_text(encoding='utf-8-sig'))
 
 
 class Generator:
@@ -39,14 +29,8 @@ class Generator:
         specification = {'prompt':prompt,'provider':self.provider,'model':self.model,
                          'temperature':self.temperature, 'max_tokens':6000,
                          'extra_body':{'thinking':{'type':'disabled'}} if self.provider=='deepseek' else {}}
-        fingerprint=digest(json.dumps(specification,sort_keys=True))
-        if path.exists():
-            record=read_json(path)
-            if record['fingerprint'] != fingerprint:
-                raise RuntimeError('Request identity collision: '+str(path))
-            if record['status']=='api_error':
-                raise RuntimeError('API request failed previously; inspect '+str(path))
-        else:
+        record=cached_request(path,specification)
+        if record is None:
             if self.client is None:
                 from openai import OpenAI
                 key=get_api_key(self.provider)
@@ -54,10 +38,7 @@ class Generator:
                     raise RuntimeError('Provider not configured: '+self.provider)
                 self.client=OpenAI(api_key=key,base_url=get_base_url(self.provider),
                                    timeout=180,max_retries=0)
-            record={**specification,'fingerprint':fingerprint,'status':'requested',
-                    'started_at':time.time()}
-            # A pending record is never silently rerun after an uncertain response.
-            write_json(path,record)
+            record=begin_request(path,specification)
             try:
                 response=self.client.chat.completions.create(model=self.model,
                     messages=[{'role':'user','content':prompt}],temperature=self.temperature,
@@ -72,8 +53,6 @@ class Generator:
                 raise RuntimeError('API failure '+type(exc).__name__+'; request saved at '+str(path)) from None
             record['finished_at']=time.time()
             write_json(path,record)
-        if record['status']=='requested':
-            raise RuntimeError('Uncertain pending request; inspect provider status before retry: '+str(path))
         if record['status']=='invalid':
             return None
         if not record.get('content') or record.get('finish_reason') == 'length':
@@ -104,15 +83,10 @@ class Generator:
 def run(cfg, root, provider, model, initial_source=None):
     root=Path(root)
     directory=root/f'{cfg.prompt}__{cfg.selection}__seed{cfg.seed}'
-    config_path=directory/'config.json'
-    metadata={'initial_source':str(Path(initial_source).resolve()) if initial_source else None,'implementation_hash':implementation_hash(),'config':asdict(cfg),'config_hash':cfg.digest(),'provider':provider,'model':model,
-              'baseline_train':[asdict(p) for p in TRAIN], 'baseline_test':[asdict(p) for p in TEST]}
-    if config_path.exists() and read_json(config_path)!=metadata:
-        raise RuntimeError('Existing run configuration differs')
-    write_json(config_path,metadata)
+    metadata=configure_run(directory,cfg,provider,model,initial_source,TRAIN,TEST)
     # Shared initialization identity excludes treatment, includes game and model.
     init_cfg=replace(cfg,prompt='minimal',selection='paper_truncation')
-    initial_key=digest(json.dumps({'cfg':asdict(init_cfg),'provider':provider,'model':model},sort_keys=True))[:20]
+    initial_key=initial_identity(init_cfg,provider,model)
     generator=Generator(root/'initial'/initial_key,provider,model,cfg.temperature)
     population=[]
     for i in range(cfg.population_size):
@@ -147,7 +121,7 @@ def run(cfg, root, provider, model, initial_source=None):
             tests[label]=versus(champion,TEST,replace(cfg,rounds=rounds,noise=noise),
                                 'holdout-'+label,generation)
         fixed=versus(champion,TRAIN,cfg,'fixed',generation)
-        state={'status':'evaluated','generation':generation,'config_hash':cfg.digest(),
+        state={'status':'evaluated','generation':generation,'config_hash':config_digest(cfg),
                'population':[asdict(p) for p in population],'assessment':assessment,
                'archive_keys':[p.key for p in archive],'champion':asdict(champion),
                'fixed_baselines':fixed,'holdout':tests,
@@ -180,7 +154,7 @@ def run(cfg, root, provider, model, initial_source=None):
                           'fitness':max(r['fitness'] for r in assessment),
                           'holdout_score':tests['default']['score']},ensure_ascii=False),flush=True)
         population,archive=next_population,next_archive
-    write_json(directory/'complete.json',{'config_hash':cfg.digest(),'generations':cfg.generations})
+    write_json(directory/'complete.json',{'config_hash':config_digest(cfg),'generations':cfg.generations})
 
 
 def main():
@@ -211,7 +185,7 @@ def main():
                population_size=args.population_size,eliminate=args.eliminate,rounds=args.rounds,repeats=args.repeats)
     model=get_model(args.provider,args.model)
     if args.matrix:
-        from .matrix import run_matrix
+        from tools.direct_reciprocity.matrix import run_matrix
         return run_matrix(args,model)
     if args.dry_run:
         print(json.dumps({'config':asdict(cfg),'model':model,'provider':args.provider,

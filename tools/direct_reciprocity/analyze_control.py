@@ -4,8 +4,8 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import mean
 from .analyze import interval
-from .core import Policy
-from .run import read_json, write_json
+from experiments.direct_reciprocity.core import Policy
+from .records import read_json, write_json
 
 
 def summarize_controls(root):

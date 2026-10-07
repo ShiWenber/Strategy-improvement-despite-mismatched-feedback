@@ -5,10 +5,11 @@ from pathlib import Path
 from statistics import mean
 from .core import Config, Policy, match, seed_for, versus, ranking
 from .baselines import TRAIN, TEST
-from .recover_evaluation import tolerate_holdout_failure
+from tools.direct_reciprocity.recover_evaluation import tolerate_holdout_failure
 from .prompts import build_prompt
-from .run import Generator, read_json, write_json
-from .diagnostics import implementation_hash, request_budget
+from .run import Generator
+from tools.direct_reciprocity.records import read_json, write_json
+from tools.direct_reciprocity.records import check_implementation, request_budget
 
 
 def hypothetical_fitness(candidate, slot, population, archive, cfg, generation):
@@ -30,8 +31,7 @@ def hypothetical_fitness(candidate, slot, population, archive, cfg, generation):
 def run_control(root,seed,available_only=False,evaluation_workers=1):
     root=Path(root)
     manifest=read_json(root/'matrix_plan.json')
-    if manifest['implementation_hash']!=implementation_hash():
-        raise RuntimeError('Reference engine changed; cannot compare using another implementation')
+    check_implementation(manifest)
     cells=[cell for cell in manifest['cells'] if cell['seed']==seed]
     references=[]
     for cell in cells:
@@ -102,13 +102,11 @@ def run_control(root,seed,available_only=False,evaluation_workers=1):
         print(f'Independent control complete: {name}',flush=True)
 
 
-
 def prepare_control(root,seed):
     """Generate the guaranteed truncation-budget prefix without any fitness feedback."""
     root=Path(root)
     manifest=read_json(root/'matrix_plan.json')
-    if manifest['implementation_hash']!=implementation_hash():
-        raise RuntimeError('Reference implementation changed')
+    check_implementation(manifest)
     reference=root/f'minimal__paper_truncation__seed{seed}'
     cfg=Config(**read_json(reference/'config.json')['config'])
     cfg=replace(cfg,prompt='minimal',selection='paper_truncation')
@@ -170,7 +168,7 @@ def main():
     else:
         if args.seed is None or args.seeds is not None:
             parser.error('Final control evaluation requires one --seed')
-        from .process_lock import seed_lock
+        from tools.direct_reciprocity.process_lock import seed_lock
         with seed_lock(args.root, args.seed):
             run_control(args.root,args.seed,args.available_only,args.evaluation_workers)
 

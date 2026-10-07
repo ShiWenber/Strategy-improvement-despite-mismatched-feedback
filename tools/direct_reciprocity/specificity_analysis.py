@@ -7,10 +7,13 @@ from statistics import mean
 
 import numpy as np
 
-from .core import Policy, digest
-from .run import read_json, write_json
-from .specificity import (DEFAULT_ROOT, init_prompt, choose, seal_selections, population_root)
-from .specificity_assets import ARMS
+from experiments.direct_reciprocity.core import Policy
+from .records import digest
+from .records import read_json, write_json
+from experiments.direct_reciprocity.specificity import DEFAULT_ROOT, init_prompt
+from .specificity import seal_selections
+from .records import population_root
+from experiments.direct_reciprocity.specificity_assets import ARMS
 
 
 def summarize(values):

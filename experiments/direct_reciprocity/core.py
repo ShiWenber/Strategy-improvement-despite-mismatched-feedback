@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import ast
 import builtins
-from dataclasses import dataclass, asdict
-import hashlib
+from dataclasses import dataclass
+from tools.direct_reciprocity.records import digest
 import json
 import random
 import sys
@@ -48,13 +48,6 @@ class Config:
             raise ValueError('Unknown prompt')
         if self.selection != 'paper_truncation':
             raise ValueError('Only the paper_truncation rule remains; tournament and fermi were removed')
-
-    def digest(self):
-        return digest(json.dumps(asdict(self), sort_keys=True))
-
-
-def digest(text):
-    return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
 
 def seed_for(*parts):
@@ -126,7 +119,6 @@ class RandomView:
         return self._rng.choice(values)
     def randint(self, a, b):
         return self._rng.randint(a, b)
-
 
 
 def seeded_random_module(view):

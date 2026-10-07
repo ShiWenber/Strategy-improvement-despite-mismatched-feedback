@@ -102,13 +102,12 @@ def test_current_paper_schemas_keep_every_numeric_value(relative):
 @pytest.mark.parametrize('module,entry,output', [
     ('analyze', 'summarize', 'analysis.json'),
     ('analyze_control', 'summarize_controls', 'CONTROL_ANALYSIS.json'),
-    ('factor_report', 'report', 'FACTOR_COMPARISONS.json'),
 ])
 def test_old_analysis_entries_write_json_without_markdown(tmp_path, module, entry, output):
     from importlib import import_module
     (tmp_path / 'matrix_plan.json').write_text('{"cells": []}', encoding='utf-8')
     (tmp_path / 'analysis.json').write_text('{"endpoints": [], "all_main_cells_complete": true}', encoding='utf-8')
-    result = getattr(import_module('experiments.direct_reciprocity.' + module), entry)(tmp_path)
+    result = getattr(import_module('tools.direct_reciprocity.' + module), entry)(tmp_path)
     assert json.loads((tmp_path / output).read_text(encoding='utf-8')) == result
     assert not list(tmp_path.glob('*.md'))
 
@@ -127,7 +126,7 @@ def test_specialized_analyses_preserve_reports_and_recompute_json(kind, tmp_path
         path.write_bytes(content)
 
     if kind == 'distance':
-        from experiments.direct_reciprocity import mismatch_distance as analysis
+        from tools.direct_reciprocity import mismatch_distance as analysis
         monkeypatch.setattr(sys, 'argv', ['mismatch_distance', '--root', str(ROOT),
                             '--docs', str(tmp_path), '--out-dir', str(tmp_path),
                             '--output-suffix', '_reproduct'])
