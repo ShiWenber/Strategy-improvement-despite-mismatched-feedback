@@ -239,20 +239,13 @@ def analyze(root, output_suffix=""):
     if len(seeds) == 1:
         result['note'] += ' Single-population API check: bootstrap intervals and sign-swap p-values are not evidence about the paper population.'
     write_json(root / f'ANALYSIS{output_suffix}.json', result)
-    lines = ['# 诊断针对性实验 v2：冻结协议结果', '', f"完成 {audit_result.get('n_new_requests', audit_result['n_requests'])} 次新请求；报告 tokens {audit_result.get('new_total_tokens', audit_result['total_tokens']):,}；审计问题 {len(audit_result['issues'])}。", '',
-             '| 组别 | 有效候选 | 原始默认增量 | S1 后增量 | S2 后增量 | S3 后增量 |', '| --- | ---: | ---: | ---: | ---: | ---: |']
-    for arm in ARMS:
-        lines.append(f"| {arm} | {raw[arm]['valid']}/{raw[arm]['n']} | {raw[arm]['metrics']['default/score']['mean']:+.6f} | " +
-                     ' | '.join(f"{chosen[r + '/' + arm]['metrics']['default']['mean']:+.6f}" for r in ('S1', 'S2', 'S3')) + ' |')
-    lines += ['', f"主比较 accurate−mismatched：{primary['mean']:+.6f}，95% 区间 {primary['ci95']}，配对符号交换 p={primary['sign_swap_p']:.6f}。", '', result['note'], '']
-    (root / f'REPORT{output_suffix}.md').write_text('\n'.join(lines), encoding='utf-8')
     return result
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('root', nargs='?', default=DEFAULT_ROOT)
-    parser.add_argument('--output-suffix', default='', help='Append to generated audit, analysis and report filenames.')
+    parser.add_argument('--output-suffix', default='', help='Append to generated audit and analysis filenames.')
     args = parser.parse_args()
     result = analyze(args.root, args.output_suffix)
     print(json.dumps({'primary': result['primary'], 'audit': result['audit']}))

@@ -80,17 +80,6 @@ def summarize(root):
             'missingness_note':'Runtime failures are null, not zero. Score summaries and paired contrasts use successful tests only and may have survivorship bias; report failure counts alongside scores.',
             'note':'Exploratory 5-seed estimates. Equal-generation comparisons are not equal-token or equal-call effects. Independent-sampling control is reported separately.'}
     write_json(root/'analysis.json',output)
-    lines=['# 直接互惠主实验进度与结果','',f"完整条件：{sum(r['complete'] for r in rows)}/{len(rows)}。",'',
-           '统计单位为独立生成种子；对局轮数不作为独立样本。五种子区间仅用于探索，未作多重检验校正。',
-           '训练分数与独立测试分数分开；等代数比较含实际调用量差异，不等于等预算因果效应。','',
-           '| 提示 | 选择 | 完整/测试成功/失败 | 测试每轮收益 | 合作率 | 平均请求数 | 平均tokens |',
-           '| --- | --- | ---: | ---: | ---: | ---: | ---: |']
-    def number(value):
-        return 'NA' if value is None else f'{value:.4f}'
-    for r in summaries:
-        lines.append(f"| {r['prompt']} | {r['selection']} | {r['n']}/{r['n_successful']}/{r['runtime_failures']} | {number(r['score_mean'])} | {number(r['cooperation_mean'])} | {r['request_mean']:.1f} | {r['token_mean']:.0f} |")
-    lines+=['','测试执行失败记为缺失；收益及配对差值只使用成功测试，存在幸存者偏差，必须同时报告失败数量。','','完整逐种子指标、未完成条件和配对差值见 analysis.json。独立采样对照未完成前，不将主矩阵完成等同整个研究计划完成。']
-    (root/'REPORT.md').write_text('\n'.join(lines)+'\n',encoding='utf-8')
     return output
 
 

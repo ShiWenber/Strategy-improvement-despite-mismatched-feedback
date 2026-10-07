@@ -76,11 +76,17 @@ uv run python tools/judge_mismatch_detection_summary.py report --judgments-dir r
 | 5. Candidate distributions and selection | DeepSeek OFF/ON candidates and S3 decisions -> `population_summary_reproduct.json` |
 | 6. Opponent-family payoffs | Per-opponent H -> `figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json` |
 | 7. Independent behavioural stages | F′ measurements and S3 decisions -> `behavior/ANALYSIS_reproduct.json` |
-| 8. Mismatch distances and sensitivity | F reports, parent/donor pairs and candidate H -> `docs/direct_reciprocity/mismatch_distance/` |
+| 8. Mismatch distances and sensitivity | F reports, parent/donor pairs and candidate H -> `docs/direct_reciprocity/mismatch_distance/`; narrative report in `docs/direct_reciprocity/MISMATCH_DISTANCE_ANALYSIS_reproduct.md` |
 | 9. Cross-model summary | Four configurations and paired population vectors -> CSV/JSON in `results/model_comparison_20260928/` |
 | 10. Visible-reasoning labels | Cached judgments -> JSON/report in `results/mismatch_detection_jev/` |
 
 Step 9 exports `cross_model_mainline_data_reproduct.json`, `candidate_gains_reproduct.csv` (candidate gains), `population_gains_reproduct.csv` (population gains) and `condition_statistics_reproduct.csv` (means and intervals). Step 10 exports `jev_recount_reproduct.json` and `REPORT_reproduct.md`.
+
+For an optional readable view of any analysis JSON, use the renderer below. It preserves stored values without running experiments or statistics, and writes Markdown beside the input with the same stem; `--output` selects another destination. The distance narrative and Jev detail reports remain dedicated outputs of steps 8 and 10.
+
+```sh
+uv run python tools/render_report.py results/feedback_specificity_v2/ANALYSIS_reproduct.json
+```
 
 ## Reproduce the figures and tables
 

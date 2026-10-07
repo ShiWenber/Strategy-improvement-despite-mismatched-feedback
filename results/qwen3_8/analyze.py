@@ -100,21 +100,6 @@ def analyze(input_root=ROOT, source=SOURCE, output_suffix=""):
     summary = {'model': 'qwen3.8-flash', 'modes': reports, 'focus': focus,
                'limitation': 'Thinking and max_tokens differ between modes; H was already used historically.'}
     write_json(input_root / f'ANALYSIS{output_suffix}.json', summary)
-    lines = ['# Qwen3.8-Flash paired replication', '',
-             'Same frozen 20 populations, 60 parents and 240 prompts per mode. H was previously used.', '',
-             '| Mode | Valid / 240 | Raw Accurate | Raw Mismatched | S3 Accurate | S3 Mismatched | Input tokens | Output tokens | Uncached list cost (CNY) |',
-             '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
-    for mode in ('off', 'on'):
-        report = reports[mode]
-        aud, result = report['audit'], report['result']
-        raw = [result['raw'][arm]['metrics']['default/score']['mean'] for arm in ('accurate', 'mismatched')]
-        s3 = [result['selected']['S3/' + arm]['metrics']['default']['mean'] for arm in ('accurate', 'mismatched')]
-        lines.append(f"| {mode} | {aud['valid']} | {raw[0]:+.5f} | {raw[1]:+.5f} | {s3[0]:+.5f} | {s3[1]:+.5f} | {aud['usage']['prompt_tokens']:,} | {aud['usage']['completion_tokens']:,} | {aud['reported_cost_cny_uncached_beijing']:.2f} |")
-    lines.extend(['', 'Primary descriptive contrasts (population is the independent unit):', ''])
-    for key, value in focus.items():
-        lines.append(f"- {key}: raw Accurate − Mismatched {value['mean']:+.5f} payoff per round; Holm p={value['holm_p']:.5f}.")
-    lines.extend(['', 'Thinking and output limit differ between modes (6,000 vs 131,072); the mode contrast does not isolate thinking alone. The cost assumes uncached Beijing list prices and can differ from the actual bill.', ''])
-    (input_root / f'REPORT{output_suffix}.md').write_text('\n'.join(lines), encoding='utf-8')
     return summary
 
 

@@ -162,22 +162,6 @@ def analyze(root, source=SOURCE, source_analysis="ANALYSIS.json", output_suffix=
               'configuration_differences_exploratory':exploratory, 'limitations':limitation,
               'analysis_source_hash':filehash(__file__)}
     write_json(root/f'ANALYSIS{output_suffix}.json',result)
-    lines = ['# 原生思考模式 384K：历史配对补充实验','',
-             f"完成 {aud['requests']} 次新候选调用，有效 {aud['statuses'].get('valid',0)} 个；记录审计问题 {len(aud['issues'])}。",
-             '','同一 60 个父代、两种报告条件、每组两个候选。thinking=enabled，reasoning_effort=high，max_tokens=384000。','',
-             '| 反馈组 | 旧配置原始增量 | 思考原始增量 | 旧配置 S3 增量 | 思考 S3 增量 | 思考有效候选 |',
-             '| --- | ---: | ---: | ---: | ---: | ---: |']
-    for arm in m['arms']:
-        vals = [old['raw'][arm]['metrics']['default/score']['mean'],new['raw'][arm]['metrics']['default/score']['mean'],
-                old['selected']['S3/'+arm]['metrics']['default']['mean'],new['selected']['S3/'+arm]['metrics']['default']['mean']]
-        lines.append('| '+arm+' | '+' | '.join(f'{v:+.5f}' for v in vals)+f" | {new['raw'][arm]['valid']}/120 |")
-    lines += ['','重点比较（两个检验作 Holm 校正；完整区间见 ANALYSIS.json）：','']
-    for key,v in focus.items():
-        lines.append(f"- {key}：每轮差值 {v['mean']:+.5f}；{v['positive_seeds']}/20 种群为正，{v['negative_seeds']}/20 为负；调整后 p={v['holm_p']:.5f}。")
-    lines += ['',limitation,'',f"最终候选请求报告 token {aud['total_tokens']:,}，输出 token {aud['completion_tokens']:,}；其中包含思考。384K 是上限，不能当作实际用量。",
-              f"另有归档请求尝试 {aud['archived_attempts']} 条，其中 {aud['archived_attempts_usage_missing']} 条缺少用量；归档尝试已报告 token {aud['archived_attempts_reported_total_tokens']:,}。上述已报告用量不代表包含中断请求的完整账单。",
-              '', '该报告列出效应与审计事实；是否形成新的论文主张需结合行为结果和上述适用范围解释。','']
-    (root/f'REPORT{output_suffix}.md').write_text('\n'.join(lines),encoding='utf-8')
     print(json.dumps({'audit_issues':aud['issues'],'focus':focus},ensure_ascii=False))
     return result
 

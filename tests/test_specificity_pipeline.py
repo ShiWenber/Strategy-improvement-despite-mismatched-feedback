@@ -78,6 +78,7 @@ class PipelineTest(unittest.TestCase):
                 self.assertEqual(result['audit']['issues'], [])
                 self.assertEqual(result['audit']['n_requests'], 32)
                 self.assertEqual(result['selected']['S3/accurate']['metrics']['default']['mean'], -3)
+                self.assertFalse((root / 'REPORT.md').exists())
 
                 reused = root / 'reused'
                 subset = runner.freeze(reused, seeds=[901], ranks=[1], source=root)
@@ -99,6 +100,7 @@ class PipelineTest(unittest.TestCase):
                 self.assertEqual(small['audit']['n_new_requests'], 4)
                 self.assertEqual(small['audit']['n_reused_initial_requests'], 12)
                 self.assertEqual(small['primary']['n_seeds'], 1)
+                self.assertFalse((reused / 'REPORT_reproduct.md').exists())
                 self.assertFalse((reused / 'initial').exists())
                 self.assertFalse((reused / 'populations').exists())
                 population = root / 'populations/s901.json'
