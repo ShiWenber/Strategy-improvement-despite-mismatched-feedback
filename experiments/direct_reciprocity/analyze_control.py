@@ -82,15 +82,6 @@ def summarize_controls(root):
               'summaries': summaries,
               'scope': 'Structural budget/selection audit, not independent payoff recomputation. Differences are evolution minus independent sampling, conditional on both tests succeeding. Equal request counts do not equal tokens or compute.'}
     write_json(root/'CONTROL_ANALYSIS.json', result)
-    lines = ['# 独立采样对照', '', f'已有对照 {len(rows)}/{len(plan["cells"])}，审计问题 {len(issues)}。', '',
-             '差值为演化冠军减独立采样冠军的每轮收益。两者均按训练分数选优，调用次数匹配；tokens和评价计算量不匹配。',
-             '仅成功配对进入收益比较，测试失败须单独报告，可能存在幸存者偏差。', '',
-             '| 提示 | 选择 | 测试 | 成功配对/已有 | 演化失败/对照失败 | 平均收益差 |',
-             '| --- | --- | --- | ---: | ---: | ---: |']
-    for s in summaries:
-        value = 'NA' if s['mean_difference'] is None else f"{s['mean_difference']:.4f}"
-        lines.append(f"| {s['prompt']} | {s['selection']} | {s['test']} | {s['paired_successes']}/{s['n']} | {s['evolved_failures']}/{s['control_failures']} | {value} |")
-    (root/'CONTROL_REPORT.md').write_text('\n'.join(lines)+'\n', encoding='utf-8')
     print({'controls': len(rows), 'missing': len(missing), 'issues': len(issues)})
     return result
 

@@ -116,22 +116,6 @@ def run(root, analysis_file="ANALYSIS.json", output_suffix=""):
                   verification=dict(policy_edge_cases='passed', sealed_decisions_reconstructed=len(sealed),
                                     frozen_raw_and_selected_seed_values='passed', decomposition_identity='passed'))
     (out/f'ANALYSIS{output_suffix}.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
-    lines = ['# 固定池角色分析（事后探索）', '', result['note'], '',
-             'R=随机候选；G=随机候选后评价门控；U=合格候选中随机；B=合格候选中按分数最优。', '',
-             '| 组别/规则 | R | G | U | B | B−R | G−R | U−G | B−U |',
-             '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
-    for key, row in summaries.items():
-        if key.endswith('/default'):
-            lines.append('| ' + key.removesuffix('/default') + ' | ' + ' | '.join(f"{row[m]['mean']:+.6f}" for m in ('R', 'G', 'U', 'B', 'total', 'gate', 'opportunity', 'ranking')) + ' |')
-    lines += ['', '## 配对差分精度（未校正 95% 种群 bootstrap）', '',
-              '| 组别/规则/设置 | B−R | G−R | U−G | B−U |', '| --- | --- | --- | --- | --- |']
-    for key, row in summaries.items():
-        lines.append('| ' + key + ' | ' + ' | '.join(f"{row[m]['mean']:+.6f} [{row[m]['ci95'][0]:+.6f}, {row[m]['ci95'][1]:+.6f}]" for m in ('total', 'gate', 'opportunity', 'ranking')) + ' |')
-    lines += ['', '## 候选与候选池', '', '| 组别 | 改善 | 退化 | 持平 | 至少一个改善/60 | 两个改善/60 |', '| --- | ---: | ---: | ---: | ---: | ---: |']
-    for arm, c in counts.items():
-        lines.append(f"| {arm} | {c['better']} | {c['worse']} | {c['equal']} | {c['pools_with_better']} | {c['both_better']} |")
-    lines += ['', '该分解依赖指定路径，不能把其比例解释为模型与评价器的一般因果贡献。全部区间为事后探索性结果。', '']
-    (out/f'REPORT{output_suffix}.md').write_text('\n'.join(lines), encoding='utf-8')
     return out
 
 
