@@ -111,3 +111,50 @@ def test_old_analysis_entries_write_json_without_markdown(tmp_path, module, entr
     result = getattr(import_module('experiments.direct_reciprocity.' + module), entry)(tmp_path)
     assert json.loads((tmp_path / output).read_text(encoding='utf-8')) == result
     assert not list(tmp_path.glob('*.md'))
+
+
+@pytest.mark.parametrize('kind', ['distance', 'jev'])
+def test_specialized_analyses_preserve_reports_and_recompute_json(kind, tmp_path, monkeypatch, capsys):
+    paths = [ROOT / name for name in [
+        'docs/direct_reciprocity/MISMATCH_DISTANCE_ANALYSIS.md',
+        'docs/direct_reciprocity/MISMATCH_DISTANCE_ANALYSIS_reproduct.md',
+        'results/mismatch_detection_jev/REPORT.md',
+        'results/mismatch_detection_jev/REPORT_reproduct.md',
+    ]]
+    original_reports = {path: path.read_bytes() for path in paths}
+    local_reports = {tmp_path / path.name: b'Retained reference report\n' for path in paths}
+    for path, content in local_reports.items():
+        path.write_bytes(content)
+
+    if kind == 'distance':
+        from experiments.direct_reciprocity import mismatch_distance as analysis
+        monkeypatch.setattr(sys, 'argv', ['mismatch_distance', '--root', str(ROOT),
+                            '--docs', str(tmp_path), '--out-dir', str(tmp_path),
+                            '--output-suffix', '_reproduct'])
+        analysis.main()
+        result = json.loads(capsys.readouterr().out)
+        assert result['regimes'] == ['thinking_off', 'thinking_on']
+        assert 'markdown' not in result
+        for mode in result['regimes']:
+            filename = f'mismatch_distance_{mode}_reproduct.json'
+            actual = json.loads((tmp_path / filename).read_text(encoding='utf-8'))
+            expected = json.loads((ROOT / 'docs/direct_reciprocity/mismatch_distance' / filename).read_text(encoding='utf-8'))
+            for key in ('rows', 'distance_summary', 'weak_mismatch_sensitivity'):
+                assert actual[key] == expected[key]
+    else:
+        from tools import judge_mismatch_detection_summary as analysis
+        monkeypatch.setattr(analysis, 'OUT', tmp_path)
+        output = tmp_path / 'jev_recount_reproduct.json'
+        monkeypatch.setattr(sys, 'argv', ['judge_mismatch_detection_summary', 'report',
+                            '--judgments-dir', str(ROOT / 'results/mismatch_detection_jev/judgments'),
+                            '--threshold', '0.40', '--confidence', '0.60', '--output-json', str(output)])
+        analysis.main()
+        actual = json.loads(output.read_text(encoding='utf-8'))
+        expected = json.loads((ROOT / 'results/mismatch_detection_jev/jev_recount_reproduct.json').read_text(encoding='utf-8'))
+        for key in ('files_judged', 'by_arm', 'failed', 'threshold', 'confidence_gate', 'not_fitting_budget'):
+            assert actual[key] == expected[key]
+        assert json.loads(capsys.readouterr().out) == actual
+
+    assert {path: path.read_bytes() for path in original_reports} == original_reports
+    assert {path: path.read_bytes() for path in local_reports} == local_reports
+    assert set(tmp_path.glob('*.md')) == set(local_reports)

@@ -18,7 +18,7 @@ Pipeline
    Choice rather than a yes/no probability because it separates "silently kept
    using it" from "explicitly accepted it as mine", returns `confidence` and
    the full distribution, and needs no arbitrary cut point.
-4. **Report** per-condition rates and the three-level probabilities.
+4. **Summarize** cached judgments as JSON with per-condition rates and probabilities.
 
 The condition label is never placed in `state`; only the report block the model
 actually saw, plus the extraction. Otherwise the judgment leaks.
@@ -551,7 +551,6 @@ def cmd_report(args) -> None:
             'kept_using_among_confident': (
                 sum(1 for r in confident if r.get('resolution_choice') == 'kept_using') / len(confident)
                 if confident else None),
-            'confident_ids': sorted(r['job_id'] for r in confident),
         }
 
     summary = {
@@ -566,106 +565,13 @@ def cmd_report(args) -> None:
         'summary_prompt_tokens': sum(r.get('summary_usage', {}).get('prompt_tokens', 0) for r in rows),
         'summary_completion_tokens': sum(r.get('summary_usage', {}).get('completion_tokens', 0) for r in rows),
         'jev_input_tokens': sum(r.get('input_tokens', 0) or 0 for r in rows),
-        'by_arm': {k: {kk: vv for kk, vv in v.items() if kk != 'confident_ids'}
-                   for k, v in by_arm.items()},
+        'by_arm': by_arm,
     }
     output_json = args.output_json or OUT / 'summary.json'
     output_json.parent.mkdir(parents=True, exist_ok=True)
     output_json.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding='utf-8')
 
-    pooled = [r for r in rows if r['arm'] != 'mismatched' and r.get('origin_prob_questions') is not None]
-    pooled_leaning = sum(1 for r in pooled if r['origin_prob_questions'] >= thr)
-    pooled_confident = sum(1 for r in pooled
-                           if r['origin_prob_questions'] >= thr
-                           and (r.get('origin_confidence') or 0) >= gate)
-
-    lines = [
-        '# 错配报告是否被发现',
-        '',
-        f'- 数据：`{summary["run"]}`（Thinking ON），共 {len(rows)} 条请求',
-        f'- 抽取：`{SUMMARY_MODEL}`；判读：`{summary["jev_model"]}`',
-        f'- 失败 {summary["failed"]}；抽取超预算 {summary["not_fitting_budget"]}',
-        f'- 用量：抽取 {summary["summary_prompt_tokens"]:,} prompt + '
-        f'{summary["summary_completion_tokens"]:,} completion；'
-        f'Jev {summary["jev_input_tokens"]:,} input tokens',
-        '',
-        '每条思维链由 deepseek-flash 分块抽取报告来源相关的**原文引语**（不做概述，概述会丢失信号），',
-        '长度落入 Jev 单请求预算后交给 Jev 判两个三档问题。`state` 只含报告块与抽取结果，',
-        '条件标签不进入请求。',
-        '',
-        '## 三档概率与标签',
-        '',
-        '每条文件的 origin 三档概率之和为 1，下表为跨文件均值；标签为 argmax 计数。',
-        '',
-        '| 条件 | 文件 | P(origin) | P(accepts) | P(silent) | 标签 origin/accepts/silent | 均值置信度 |',
-        '| --- | ---: | ---: | ---: | ---: | ---: | ---: |',
-    ]
-    for arm in ARMS:
-        row = by_arm.get(arm)
-        if not row:
-            continue
-        mp, lb = row['mean_probs'], row['labels']
-        lines.append(
-            f'| {arm} | {row["files"]} | {mp["questions_its_origin"]:.3f} '
-            f'| {mp["accepts_as_labelled"]:.3f} | {mp["silent"]:.3f} '
-            f'| {lb["questions_its_origin"]}/{lb["accepts_as_labelled"]}/{lb["silent"]} '
-            f'| {row["mean_confidence"]:.3f} |')
-
-    lines += [
-        '',
-        '## 检出率',
-        '',
-        f'- `leaning`：P(origin) ≥ {thr}',
-        f'- `confident`：上述条件且 confidence ≥ {gate}（窄口径，Accurate对照严格判读为0）',
-        '',
-        '| 条件 | leaning | 检出率 | confident | 检出率 |',
-        '| --- | ---: | ---: | ---: | ---: |',
-    ]
-    for arm in ARMS:
-        row = by_arm.get(arm)
-        if not row:
-            continue
-        lines.append(f'| {arm} | {row["leaning"]}/{row["files"]} | {row["leaning_rate"]:.3f} '
-                     f'| {row["confident"]}/{row["files"]} | {row["confident_rate"]:.3f} |')
-    lines.append(f'| **Accurate报告条件** | {pooled_leaning}/{len(pooled)} '
-                 f'| {pooled_leaning / len(pooled):.4f} | {pooled_confident}/{len(pooled)} '
-                 f'| {pooled_confident / len(pooled):.4f} |')
-
-    lines += [
-        '',
-        '## 处理方式（三档 resolution）',
-        '',
-        '| 条件 | kept_using | discarded | unclear | confident 中仍 kept_using |',
-        '| --- | ---: | ---: | ---: | ---: |',
-    ]
-    for arm in ARMS:
-        row = by_arm.get(arm)
-        if not row:
-            continue
-        rs, keep = row['resolutions'], row['kept_using_among_confident']
-        lines.append(f'| {arm} | {rs["kept_using"]} | {rs["discarded"]} | {rs["unclear"]} '
-                     f'| {"—" if keep is None else f"{keep:.3f}"} |')
-
-    lines += ['', f'## confident 明细（P(origin) ≥ {thr} 且 confidence ≥ {gate}）', '']
-    for arm in ARMS:
-        row = by_arm.get(arm)
-        if not row or not row['confident_ids']:
-            continue
-        lines.append(f'### {arm}（{row["confident"]}/{row["files"]}）')
-        lines.append('')
-        for jid in row['confident_ids']:
-            match = next(r for r in rows if r['job_id'] == jid)
-            lines.append(f'- `{jid}` — {match["origin_choice"]}, '
-                         f'P(origin)={match["origin_prob_questions"]:.2f}, '
-                         f'confidence={match.get("origin_confidence"):.2f}, '
-                         f'resolution={match.get("resolution_choice")}')
-        lines.append('')
-
-    output_markdown = args.output_markdown or OUT / 'REPORT.md'
-    output_markdown.parent.mkdir(parents=True, exist_ok=True)
-    output_markdown.write_text('\n'.join(lines), encoding='utf-8')
     print(json.dumps(summary, indent=2, ensure_ascii=False))
-    print(f'\nwrote {output_markdown}')
 
 
 def main() -> None:
@@ -681,7 +587,6 @@ def main() -> None:
     parser.add_argument('--force', action='store_true')
     parser.add_argument('--judgments-dir', type=Path, help='Cached labels used by report; no API calls.')
     parser.add_argument('--output-json', type=Path)
-    parser.add_argument('--output-markdown', type=Path)
     args = parser.parse_args()
     {'prep': cmd_prep, 'run': cmd_run, 'report': cmd_report}[args.command](args)
 
