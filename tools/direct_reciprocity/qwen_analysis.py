@@ -2,19 +2,18 @@
 import argparse
 import json
 from pathlib import Path
-import sys
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parent
-WORKSPACE = ROOT.parents[1]
-sys.path.insert(0, str(WORKSPACE))
+WORKSPACE = Path(__file__).resolve().parents[2]
+ROOT = WORKSPACE / 'results/qwen3_8'
 
-from experiments.direct_reciprocity.core import Policy, digest
-from experiments.direct_reciprocity.qwen38_control import SOURCE, filehash, specification
-from experiments.direct_reciprocity.run import read_json, write_json
-from experiments.direct_reciprocity.specificity_analysis import contrast, holm
-from thinking_control_analysis import aggregate
+from experiments.direct_reciprocity.core import Policy
+from .records import digest, filehash
+from experiments.direct_reciprocity.qwen38_control import SOURCE, specification
+from .records import read_json, write_json
+from tools.direct_reciprocity.specificity_analysis import contrast, holm
+from .thinking_control_analysis import aggregate
 
 
 def audit(root, manifest, source=SOURCE):

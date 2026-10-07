@@ -33,6 +33,8 @@ Each model/configuration uses the same 20 populations and 60 parents, with two c
 
 The paper names the DeepSeek model deepseek-v4.1-flash; recorded requests use the API identifier `deepseek-flash`. API aliases do not guarantee fixed model weights over time. OFF/ON differ in thinking settings, output budgets and collection times, so configuration differences do not isolate the thinking switch. Qwen is a follow-up model test using the same parents and evaluation panels.
 
+`experiments/direct_reciprocity/` contains the experimental algorithms and API generation; `tools/direct_reciprocity/` contains workflow entry points, manifests, hashes, record audits and statistical analyses. Figure tools are in `tools/figures/`.
+
 ### Record types
 
 Paths are relative to each experiment directory unless stated otherwise. ON and Qwen records use the shared parents.
@@ -55,14 +57,14 @@ Paths are relative to each experiment directory unless stated otherwise. ON and 
 `--output-suffix _reproduct` appends the suffix to generated filenames beside the paper data; `--analysis-suffix` or `--analysis-file` selects these outputs as downstream inputs. The table maps each command, in order, to its analysis and outputs.
 
 ```sh
-uv run python -m experiments.direct_reciprocity.specificity_analysis results/feedback_specificity_v2 --output-suffix _reproduct
-uv run python thinking_control_analysis.py results/feedback_specificity_thinking_384k_20260923 --source results/feedback_specificity_v2 --source-analysis ANALYSIS_reproduct.json --output-suffix _reproduct
-uv run python results/qwen3_8/analyze.py --root results/qwen3_8 --source results/feedback_specificity_v2 --output-suffix _reproduct
-uv run python -m experiments.direct_reciprocity.role_analysis results/feedback_specificity_v2 --analysis-file ANALYSIS_reproduct.json --output-suffix _reproduct
+uv run python -m tools.direct_reciprocity.specificity_analysis results/feedback_specificity_v2 --output-suffix _reproduct
+uv run python -m tools.direct_reciprocity.thinking_control_analysis results/feedback_specificity_thinking_384k_20260923 --source results/feedback_specificity_v2 --source-analysis ANALYSIS_reproduct.json --output-suffix _reproduct
+uv run python -m tools.direct_reciprocity.qwen_analysis --root results/qwen3_8 --source results/feedback_specificity_v2 --output-suffix _reproduct
+uv run python -m tools.direct_reciprocity.role_analysis results/feedback_specificity_v2 --analysis-file ANALYSIS_reproduct.json --output-suffix _reproduct
 uv run python tools/analyze_population.py --analysis-suffix _reproduct --output results/reciprocity_population_visuals_20260924/population_summary_reproduct.json
 uv run python tools/figures/analyze_opponent_profiles.py --analysis-suffix _reproduct --output results/figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json
 uv run python tools/figures/plot_behavior_evidence.py --analysis-suffix _reproduct --output results/reciprocity_population_visuals_20260924/behavior/ANALYSIS_reproduct.json
-uv run python -m experiments.direct_reciprocity.mismatch_distance --root . --output-suffix _reproduct
+uv run python -m tools.direct_reciprocity.mismatch_distance --root . --output-suffix _reproduct
 uv run python results/model_comparison_20260928/cross_model_summary.py --analysis-suffix _reproduct --output results/model_comparison_20260928/cross_model_mainline_data_reproduct.json --csv-dir results/model_comparison_20260928 --output-suffix _reproduct
 uv run python tools/judge_mismatch_detection_summary.py report --judgments-dir results/mismatch_detection_jev/judgments --threshold 0.40 --confidence 0.60 --output-json results/mismatch_detection_jev/jev_recount_reproduct.json
 ```

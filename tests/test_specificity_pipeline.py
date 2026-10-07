@@ -6,11 +6,13 @@ import time
 import unittest
 from unittest.mock import patch
 
-from experiments.direct_reciprocity import specificity as runner
-from experiments.direct_reciprocity import specificity_analysis as analysis
+from experiments.direct_reciprocity import specificity as experiment
+from tools.direct_reciprocity import specificity as runner
+from tools.direct_reciprocity import specificity_analysis as analysis
 from experiments.direct_reciprocity.baselines import TRAIN
-from experiments.direct_reciprocity.core import Policy, digest, Config
-from experiments.direct_reciprocity.run import write_json, read_json
+from experiments.direct_reciprocity.core import Policy, Config
+from tools.direct_reciprocity.records import digest
+from tools.direct_reciprocity.records import write_json, read_json
 from experiments.direct_reciprocity.specificity_assets import probes
 
 
@@ -47,23 +49,23 @@ class PipelineTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             with patch.object(runner, 'SEEDS', (901, 902)), patch.object(runner, 'RANKS', (1,)), \
-                 patch.object(runner, 'Generator', FakeGenerator), \
-                 patch.object(runner, 'evaluate', lambda pop, archive, cfg, gen: [{'fitness': i} for i in range(len(pop))]), \
-                 patch.object(runner, 'measured_selection', synthetic_selection), \
-                 patch.object(runner, 'holdout_measure', synthetic_holdout):
+                 patch.object(experiment, 'Generator', FakeGenerator), \
+                 patch.object(experiment, 'evaluate', lambda pop, archive, cfg, gen: [{'fitness': i} for i in range(len(pop))]), \
+                 patch.object(experiment, 'measured_selection', synthetic_selection), \
+                 patch.object(experiment, 'holdout_measure', synthetic_holdout):
                 manifest = runner.freeze(root)
                 for job in manifest['init_jobs']:
-                    runner.initial_job((str(root), job))
+                    experiment.initial_job((str(root), job))
                 for seed in (901, 902):
-                    runner.prepare_seed((str(root), seed))
+                    experiment.prepare_seed((str(root), seed))
                 sealed = runner.make_prompts(root, manifest)
                 self.assertEqual(sealed['effective_mismatch_contexts'], 0)
                 for job in manifest['jobs']:
-                    runner.candidate_job((str(root), job))
+                    experiment.candidate_job((str(root), job))
                 identities = [('parent', f's{s}-rank1') for s in (901, 902)]
                 identities += [('child', j['id']) for j in manifest['jobs']]
                 for kind, identity in identities:
-                    runner.evaluation_job((str(root), kind, identity))
+                    experiment.evaluation_job((str(root), kind, identity))
                 selection = runner.seal_selections(root, manifest)
                 self.assertTrue(all(r['accepted'] for r in selection['rows']))
                 self.assertEqual(manifest['arms'], ['accurate', 'mismatched'])
@@ -72,7 +74,7 @@ class PipelineTest(unittest.TestCase):
                 write_json(root / 'H_RELEASED.json', {
                     'selection_digest': digest((root / 'SELECTIONS_SEALED.json').read_text(encoding='utf-8'))})
                 for kind, identity in identities:
-                    runner.holdout_job((str(root), kind, identity))
+                    experiment.holdout_job((str(root), kind, identity))
                 write_json(root / 'COMPLETE.json', {'synthetic': True})
                 result = analysis.analyze(root)
                 self.assertEqual(result['audit']['issues'], [])
@@ -86,15 +88,15 @@ class PipelineTest(unittest.TestCase):
                 self.assertEqual(runner.population_root(reused), root.resolve())
                 runner.make_prompts(reused, subset)
                 for job in subset['jobs']:
-                    runner.candidate_job((str(reused), job))
+                    experiment.candidate_job((str(reused), job))
                 identities = [('parent', 's901-rank1')] + [('child', j['id']) for j in subset['jobs']]
                 for kind, identity in identities:
-                    runner.evaluation_job((str(reused), kind, identity))
+                    experiment.evaluation_job((str(reused), kind, identity))
                 runner.seal_selections(reused, subset)
                 write_json(reused / 'H_RELEASED.json', {
                     'selection_digest': digest((reused / 'SELECTIONS_SEALED.json').read_text(encoding='utf-8'))})
                 for kind, identity in identities:
-                    runner.holdout_job((str(reused), kind, identity))
+                    experiment.holdout_job((str(reused), kind, identity))
                 write_json(reused / 'COMPLETE.json', {'synthetic': True})
                 small = analysis.analyze(reused, '_reproduct')
                 self.assertEqual(small['audit']['n_new_requests'], 4)

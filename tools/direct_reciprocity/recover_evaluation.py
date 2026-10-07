@@ -6,9 +6,10 @@ the additional execution layer is recorded separately for every recovered run.
 """
 import argparse
 from pathlib import Path
-from . import run as runner
-from .core import Config, PolicyError, digest, versus
-from .diagnostics import implementation_hash
+from experiments.direct_reciprocity import run as runner
+from experiments.direct_reciprocity.core import Config, PolicyError, versus
+from .records import digest
+from .records import implementation_hash
 
 
 def tolerate_holdout_failure(policy, opponents, cfg, phase, generation=0):

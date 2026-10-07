@@ -4,8 +4,8 @@ from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import patch
 from experiments.direct_reciprocity.core import Config
-from experiments.direct_reciprocity.diagnostics import implementation_hash
-from experiments.direct_reciprocity.run import read_json, write_json
+from tools.direct_reciprocity.records import implementation_hash
+from tools.direct_reciprocity.records import read_json, write_json
 from experiments.direct_reciprocity.control import prepare_control
 
 

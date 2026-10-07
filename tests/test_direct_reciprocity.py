@@ -174,7 +174,7 @@ class RunReplayTests(unittest.TestCase):
 
 class MatrixDiagnosticsTests(unittest.TestCase):
     def test_matrix_has_15_unique_cells(self):
-        from experiments.direct_reciprocity.matrix import cells
+        from tools.direct_reciprocity.matrix import cells
         planned=cells(range(5))
         self.assertEqual(len(planned),15)
         self.assertEqual(len({tuple(r.values()) for r in planned}),15)
@@ -183,8 +183,8 @@ class MatrixDiagnosticsTests(unittest.TestCase):
     def test_interrupted_future_children_not_in_evaluation_budget(self):
         import tempfile
         from pathlib import Path
-        from experiments.direct_reciprocity.run import write_json
-        from experiments.direct_reciprocity.diagnostics import request_budget
+        from tools.direct_reciprocity.records import write_json
+        from tools.direct_reciprocity.records import request_budget
         with tempfile.TemporaryDirectory() as temp:
             for name in ('initial-0','g001-child000','g002-child000'):
                 write_json(Path(temp)/(name+'.json'),{'fingerprint':name,'status':'valid','usage':{'total_tokens':10}})
@@ -200,9 +200,9 @@ class MatrixDiagnosticsTests(unittest.TestCase):
     def test_incomplete_matrix_is_not_complete_analysis(self):
         import tempfile
         from pathlib import Path
-        from experiments.direct_reciprocity.run import write_json
-        from experiments.direct_reciprocity.matrix import cells
-        from experiments.direct_reciprocity.analyze import summarize
+        from tools.direct_reciprocity.records import write_json
+        from tools.direct_reciprocity.matrix import cells
+        from tools.direct_reciprocity.analyze import summarize
         with tempfile.TemporaryDirectory() as temp:
             write_json(Path(temp)/'matrix_plan.json',{'cells':cells([0]),'generations':10})
             result=summarize(temp)
@@ -263,8 +263,8 @@ class InitialReuseTests(unittest.TestCase):
     def test_revalidate_old_import_and_preserve_original_prompt(self):
         import tempfile
         from pathlib import Path
-        from experiments.direct_reciprocity.reuse import reuse_initial
-        from experiments.direct_reciprocity.run import write_json,read_json
+        from tools.direct_reciprocity.reuse import reuse_initial
+        from tools.direct_reciprocity.records import write_json,read_json
         with tempfile.TemporaryDirectory() as temp:
             src=Path(temp)/'source'
             dest=Path(temp)/'dest'/'initial-1.json'

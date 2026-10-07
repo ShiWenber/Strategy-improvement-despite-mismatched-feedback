@@ -5,8 +5,8 @@ from pathlib import Path
 import subprocess
 import sys
 import time
-from .run import write_json, read_json
-from .diagnostics import implementation_hash
+from .records import write_json, read_json
+from .records import implementation_hash
 
 
 def cells(seeds):

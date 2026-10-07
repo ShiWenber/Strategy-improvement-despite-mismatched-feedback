@@ -1,7 +1,7 @@
 """Observed evolution curves and request-budget aligned, paired-seed contrasts."""
 import argparse
 from pathlib import Path
-from .run import read_json, write_json
+from .records import read_json, write_json
 
 
 def align_pair(left, right, metric):
