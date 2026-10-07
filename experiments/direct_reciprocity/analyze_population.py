@@ -9,7 +9,7 @@ from hashlib import sha256
 import argparse
 import json
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'results/reciprocity_population_visuals_20260924'
 import numpy as np
 

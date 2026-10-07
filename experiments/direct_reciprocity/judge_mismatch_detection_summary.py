@@ -25,9 +25,9 @@ actually saw, plus the extraction. Otherwise the judgment leaks.
 
 Usage
 -----
-    python tools/judge_mismatch_detection_summary.py prep
-    python tools/judge_mismatch_detection_summary.py run --workers 16
-    python tools/judge_mismatch_detection_summary.py report
+    python -m experiments.direct_reciprocity.judge_mismatch_detection_summary prep
+    python -m experiments.direct_reciprocity.judge_mismatch_detection_summary run --workers 16
+    python -m experiments.direct_reciprocity.judge_mismatch_detection_summary report
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv  # noqa: E402

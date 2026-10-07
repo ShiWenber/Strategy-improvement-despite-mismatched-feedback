@@ -6,7 +6,7 @@ from .thinking_control import transport_diagnostics, validate, receive_stream
 
 from .core import Policy
 from .specificity import cfg_for
-from tools.direct_reciprocity.records import read_json, write_json, cached_request, begin_request
+from .records import read_json, write_json, cached_request, begin_request
 
 SOURCE = Path('results/feedback_specificity_v2')
 DEFAULT_ROOT = Path('results/qwen3_8')

@@ -1,50 +1,49 @@
 """Workflow integrity and module boundaries, without model requests."""
 import ast
-import importlib
-import json
 from pathlib import Path
 import sys
 from unittest.mock import patch
 
 import pytest
 
-from experiments.direct_reciprocity import specificity as experiment
-from tools.direct_reciprocity import records, specificity, paired_control
+from experiments.direct_reciprocity import records, specificity, paired_control
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize('path', sorted((ROOT / 'tools/direct_reciprocity').glob('*.py')))
-def test_moved_modules_import(path):
-    assert importlib.import_module('tools.direct_reciprocity.' + path.stem)
-
-
-def test_experiment_package_contains_no_record_integrity_implementations():
-    forbidden = {'freeze', 'check_manifest', 'verify', 'audit', 'source_hash', 'implementation_hash',
-                 'filehash', 'digest', 'seal_selections', 'release_parents', 'seed_lock', 'recover'}
-    for path in (ROOT / 'experiments/direct_reciprocity').glob('*.py'):
+def test_experiments_are_self_contained_with_one_native_entry_point():
+    for path in (ROOT / 'experiments').rglob('*.py'):
         tree = ast.parse(path.read_text(encoding='utf-8-sig'))
-        assert not {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)} & forbidden, path
-        assert not any(isinstance(node, ast.Import) and any(a.name == 'hashlib' for a in node.names)
-                       for node in ast.walk(tree)), path
-    assert not (ROOT / 'experiments/direct_reciprocity/specificity_analysis.py').exists()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                assert not (node.module or '').startswith('tools'), path
+            if isinstance(node, ast.Import):
+                assert not any(alias.name.startswith('tools') for alias in node.names), path
+    assert {p.name for p in (ROOT / 'tools').rglob('*.py')} == {'__init__.py', 'render_report.py'}
+    assert specificity.initial_job.__module__ == specificity.main.__module__
+    assert (ROOT / 'experiments/direct_reciprocity/generate_api.sh').is_file()
 
 
-def test_frozen_source_identity_covers_experimental_and_tool_implementations(tmp_path, monkeypatch):
+def test_frozen_source_identity_covers_each_experiment_module_once(tmp_path, monkeypatch):
     science = tmp_path / 'experiments/direct_reciprocity'
-    tools = tmp_path / 'tools/direct_reciprocity'
+    figures = science / 'figures'
     science.mkdir(parents=True)
-    tools.mkdir(parents=True)
+    figures.mkdir()
     (science / 'core.py').write_text('x=1\n')
-    (tools / 'records.py').write_text('x=2\n')
+    (science / 'records.py').write_text('x=2\n')
+    (figures / 'plot.py').write_text('x=3\n')
     monkeypatch.setattr(records, 'ROOT', tmp_path)
     monkeypatch.setattr(records, 'EXPERIMENTS', science)
-    monkeypatch.setattr(records, '__file__', str(tools / 'records.py'))
     first = records.implementation_hash()
-    (tools / 'records.py').write_text('x=3\n')
+    expected = records.digest('\n'.join(p.relative_to(tmp_path).as_posix() + ':' +
+                              records.digest(p.read_text()) for p in sorted(science.rglob('*.py'))))
+    assert first == expected
+    (science / 'records.py').write_text('x=4\n')
     second = records.implementation_hash()
-    (science / 'core.py').write_text('x=4\n')
-    assert len({first, second, records.implementation_hash()}) == 3
+    (science / 'core.py').write_text('x=5\n')
+    third = records.implementation_hash()
+    (figures / 'plot.py').write_text('x=6\n')
+    assert len({first, second, third, records.implementation_hash()}) == 4
 
 
 def test_exclusive_requests_resume_only_matching_finished_responses(tmp_path):

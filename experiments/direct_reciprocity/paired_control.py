@@ -6,10 +6,9 @@ import shutil
 import time
 
 from experiments.direct_reciprocity import thinking_control, qwen38_control
-from experiments.direct_reciprocity.specificity import evaluation_job, holdout_job
 from .records import (read_json, write_json, digest, filehash, implementation_hash, check_manifest,
                       population_root, release_holdout, complete, runner_lock)
-from .specificity import pool_run, seal_selections
+from .specificity import evaluation_job, holdout_job, pool_run, seal_selections
 
 SOURCE = Path('results/feedback_specificity_v2')
 
