@@ -13,6 +13,7 @@ No holdout result enters the distance definition.
 from __future__ import annotations
 
 import argparse
+from .records import read_json, write_json
 import json
 from math import sqrt
 from pathlib import Path
@@ -41,16 +42,6 @@ REGIMES = {
     'thinking_off': 'results/feedback_specificity_v2',
     'thinking_on': 'results/feedback_specificity_thinking_384k_20260923',
 }
-
-
-def read_json(path):
-    return json.loads(Path(path).read_text(encoding='utf-8-sig'))
-
-
-def write_json(path, payload):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False), encoding='utf-8')
 
 
 # ---------------------------------------------------------------------------

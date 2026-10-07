@@ -2,8 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 from experiments.direct_reciprocity.core import Policy
-from tools.direct_reciprocity.records import write_json, read_json
-from tools.direct_reciprocity.analyze_control import summarize_controls
+from experiments.direct_reciprocity.records import write_json, read_json
+from experiments.direct_reciprocity.analyze_control import summarize_controls
 
 
 class ControlAnalysisTests(unittest.TestCase):

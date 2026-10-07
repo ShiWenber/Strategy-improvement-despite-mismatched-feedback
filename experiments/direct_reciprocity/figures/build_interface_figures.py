@@ -1,7 +1,8 @@
 """Render two-condition distributions and sealed selection outcomes."""
 from pathlib import Path
+from ..records import read_json
 import argparse,json,os
-ROOT=Path(__file__).resolve().parents[2]
+ROOT=Path(__file__).resolve().parents[3]
 os.environ.setdefault('MPLCONFIGDIR',str(ROOT/'.mplconfig'))
 import matplotlib
 matplotlib.use('Agg')
@@ -11,14 +12,13 @@ from matplotlib.patches import Patch
 from matplotlib.legend_handler import HandlerTuple
 from matplotlib.ticker import MaxNLocator
 import numpy as np
-from results_plot_style import apply_style,panel_title,panel_legend,BLUE,ORANGE,GREY,DARK,GREEN
-from results_plot_audit import render_audit,WIDTH
+from .results_plot_style import apply_style,panel_title,panel_legend,BLUE,ORANGE,GREY,DARK,GREEN
+from .results_plot_audit import render_audit,WIDTH
 apply_style()
 MODES=('Thinking OFF','Thinking ON');COLORS=(BLUE,ORANGE)
 POP=ROOT/'results/reciprocity_population_visuals_20260924/population_summary.json'
 DISP=ROOT/'results/figure_rendering/frozen_generation_display.json'
 
-def read(path):return json.loads(path.read_text(encoding='utf-8-sig'))
 def vector(report,stage,arm):
  row=report['raw'][arm]['metrics']['default/score'] if stage=='Raw' else report['selected']['S3/'+arm]['metrics']['default']
  return np.asarray(row['seed_values'])
@@ -62,9 +62,9 @@ def main():
  parser.add_argument('--audit-dir',type=Path,default=ROOT/'results/reproduction')
  parser.add_argument('--reuse-display',action='store_true',help='Use frozen histogram and KDE coordinates without fitting or rewriting the display cache.')
  args=parser.parse_args()
- cache=read(args.input);pop={m:cache['configurations'][k] for m,k in zip(MODES,('Off / 6k','On / 384k'))}
+ cache=read_json(args.input);pop={m:cache['configurations'][k] for m,k in zip(MODES,('Off / 6k','On / 384k'))}
  if args.reuse_display:
-  record=generation_figure(pop,read(args.display_output),args)
+  record=generation_figure(pop,read_json(args.display_output),args)
   print(json.dumps({'figure':record['figure'],'bounds':record['out_of_canvas_text'],'minimum_font_pt':record['minimum_font_pt']}))
   return
  display={'histograms':{},'density_curves':{},'method':'Gaussian KDE with Scott bandwidth; 30 equal-width bins over shared candidate range; two report conditions only'}

@@ -24,7 +24,7 @@ def filehash(path):
 
 
 def implementation_hash():
-    paths = sorted(EXPERIMENTS.glob('*.py')) + sorted(Path(__file__).parent.glob('*.py'))
+    paths = sorted(EXPERIMENTS.rglob('*.py'))
     return digest('\n'.join(p.relative_to(ROOT).as_posix() + ':' +
                             digest(p.read_text(encoding='utf-8-sig')) for p in paths))
 

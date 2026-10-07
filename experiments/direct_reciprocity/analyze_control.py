@@ -4,7 +4,7 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import mean
 from .analyze import interval
-from experiments.direct_reciprocity.core import Policy
+from .core import Policy
 from .records import read_json, write_json
 
 

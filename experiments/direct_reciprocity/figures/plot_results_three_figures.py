@@ -11,7 +11,7 @@ import json
 import os
 import sys
 from pathlib import Path
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 os.environ.setdefault('MPLCONFIGDIR', str(ROOT / 'tmp/results_figure_mplconfig'))
 import matplotlib
 matplotlib.use('Agg')
@@ -22,7 +22,7 @@ from matplotlib.text import Text
 from matplotlib.ticker import FuncFormatter
 from matplotlib.transforms import Bbox
 import numpy as np
-from results_plot_style import apply_style, panel_heading, panel_legend, IntervalKey
+from .results_plot_style import apply_style, panel_heading, panel_legend, IntervalKey
 SOURCES = {}
 READ_KEYS = {}
 ANALYSIS_SUFFIX = ""
