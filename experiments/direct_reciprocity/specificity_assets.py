@@ -6,6 +6,7 @@ from .core import RandomView, act, seed_for
 
 ARMS = ('accurate', 'mismatched')
 SCORE_ARMS = ARMS + ('score',)
+GENERATION_ORDER = ('score', 'accurate', 'mismatched')
 
 
 def experiment_arms(arms=None):
@@ -14,6 +15,19 @@ def experiment_arms(arms=None):
     if arms not in (ARMS, SCORE_ARMS):
         raise ValueError('Use accurate mismatched, optionally followed by score')
     return arms
+
+
+def generation_arms(arms):
+    """Dispatch complete condition batches in a fixed, recorded order."""
+    return tuple(arm for arm in GENERATION_ORDER if arm in experiment_arms(arms))
+
+
+def information_prompt(base, arm, reports):
+    """The information condition changes only the appended behavioural report."""
+    if arm not in SCORE_ARMS:
+        raise ValueError('Unknown information condition: ' + arm)
+    block = '' if arm == 'score' else reports[arm]
+    return base + '\n' + block + '\nReturn only the new strategy source.\n'
 
 FAMILIES = ('recovery', 'exploitation', 'random', 'memory')
 SEEDS = tuple(range(200, 220))

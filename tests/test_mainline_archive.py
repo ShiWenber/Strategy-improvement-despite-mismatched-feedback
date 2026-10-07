@@ -69,6 +69,27 @@ def test_score_receipts_and_raw_population_contrasts_match_original_records(rela
         assert actual['mean'] == pytest.approx(sum(values) / 20, abs=1e-12, rel=0)
 
 
+@pytest.mark.parametrize('relative', RUNS)
+def test_condition_data_logs_are_complete_and_preserve_original_records(relative):
+    from experiments.direct_reciprocity.records import filehash
+    root = ROOT / 'results' / relative
+    jobs = read(root / 'manifest.json')['jobs']
+    for arm in ('score', 'accurate', 'mismatched'):
+        with (root / 'arm_logs' / (arm + '.jsonl')).open(encoding='utf-8') as stream:
+            logged = [json.loads(line) for line in stream]
+        expected = {j['id']: j for j in jobs if j['arm'] == arm}
+        assert len(logged) == len(expected) == 120
+        assert {row['id'] for row in logged} == set(expected)
+        for row in logged:
+            assert row['job'] == expected[row['id']] and row['arm'] == arm
+            assert row['status'] in ('valid', 'invalid')
+            for folder, key in [('requests_candidates', 'request'), ('candidates', 'candidate'),
+                                ('selection_scores', 'selection_scores'), ('holdout', 'holdout')]:
+                relative_path = folder + '/' + row['id'] + '.json'
+                assert row[key] == read(root / relative_path)
+                assert row['record_sha256'][relative_path] == filehash(root / relative_path)
+
+
 def test_reasoning_annotations_match_the_retained_on_requests():
     jobs = read(ROOT / 'results/feedback_specificity_thinking_384k_20260923/manifest.json')['jobs']
     identities = {j['id'] for j in jobs if j['arm'] in ('accurate', 'mismatched')}

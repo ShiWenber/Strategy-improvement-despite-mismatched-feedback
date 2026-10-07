@@ -17,7 +17,8 @@ from .report_assignment import derangement
 from .prompts import build_prompt
 from .run import Generator
 from .specificity_assets import (ARMS, SCORE_ARMS, experiment_arms, SEEDS, RANKS, panel, probes, diagnostic_block,
-                                 tokenizer, probe_specs)
+                                 tokenizer, probe_specs, generation_arms, information_prompt)
+from .condition_generation import generate_candidate, generate_conditions, write_arm_logs
 
 DEFAULT_ROOT = 'results/feedback_specificity_v2'
 
@@ -58,28 +59,23 @@ def freeze(root, seeds=None, ranks=None, source=None, arms=None):
         raise ValueError('Parent ranks must be a distinct subset of 1, 3, 6')
     init_jobs = [{'id': f'init-s{seed}-slot{slot}', 'seed': seed, 'slot': slot}
                  for seed in seeds for slot in range(12)]
-    jobs, permutations = [], {}
-    for seed in seeds:
-        # One random arm-to-request-position permutation per independent cluster.
-        order = list(arms)
-        random.Random(seed_for('specificity-arm-assignment', seed)).shuffle(order)
-        permutations[str(seed)] = order
-        for rank in ranks:
-            for draw in range(2):
-                for position, arm in enumerate(order):
-                    cid = f's{seed}-rank{rank}'
-                    jobs.append({'id': f'{cid}-d{draw}-pos{position}', 'context': cid,
-                                 'seed': seed, 'rank': rank, 'draw': draw, 'position': position, 'arm': arm})
-    # Shuffle complete parent/draw blocks, preserving randomized positions within blocks.
-    blocks = [jobs[i:i + len(arms)] for i in range(0, len(jobs), len(arms))]
-    random.Random(2026091901).shuffle(blocks)
-    jobs = [job for block in blocks for job in block]
+    order = generation_arms(arms)
+    parents = [(seed, rank, draw) for seed in seeds for rank in ranks for draw in range(2)]
+    random.Random(2026091901).shuffle(parents)
+    jobs = []
+    for position, arm in enumerate(order):
+        for seed, rank, draw in parents:
+            cid = f's{seed}-rank{rank}'
+            jobs.append({'id': f'{cid}-d{draw}-pos{position}', 'context': cid,
+                         'seed': seed, 'rank': rank, 'draw': draw, 'position': position, 'arm': arm})
     random.Random(2026091902).shuffle(init_jobs)
-    manifest = {'version': 'specificity-v2', 'implementation_hash': implementation_hash(),
+    manifest = {'version': 'specificity-v3', 'implementation_hash': implementation_hash(),
                 'engine_hash': implementation_hash(), 'provider': 'deepseek', 'model': 'deepseek-flash',
                 'config': asdict(cfg_for(seeds[0])), 'seeds': list(seeds), 'arms': list(arms),
                 'ranks': list(ranks), 'draws': 2, 'init_jobs': init_jobs, 'jobs': jobs,
-                'arm_position_permutations': permutations, 'assets': assets_record(),
+                'generation_order': list(order), 'arm_positions': {arm: i for i, arm in enumerate(order)},
+                'request_dispatch': 'Complete each condition before starting the next; concurrent requests within condition.',
+                'data_logs': {arm: f'arm_logs/{arm}.jsonl' for arm in arms}, 'assets': assets_record(),
                 'primary': 'raw_H_default_gain_accurate_minus_mismatched',
                 'independent_unit': f'{len(seeds)} population clusters', 'delta': .05,
                 'selection_repeats': {'S1': 5, 'S2': 20, 'S3': 20}, 'holdout_repeats': 20,
@@ -107,6 +103,7 @@ def freeze(root, seeds=None, ranks=None, source=None, arms=None):
         manifest['requested_calls'] = {'initial': 0, 'candidates': len(jobs), 'total': len(jobs)}
         manifest['independent_unit'] = f'{len(seeds)} reused population clusters; new candidate responses'
     write_json(root / 'manifest.json', manifest)
+    write_arm_logs(root, manifest)
     return manifest
 
 
@@ -223,7 +220,7 @@ def make_contexts(root, manifest):
             c = {'id': cid, 'seed': seed, 'rank': rank, 'slot': slot, 'donor': donor,
                  'parent': asdict(pop[slot]), 'block_tokens': lengths,
                  'effective_mismatch': correct != wrong,
-                 'prompts': {arm: base + '\n' + blocks[arm] + '\nReturn only the new strategy source.\n' for arm in arms}}
+                 'prompts': {arm: information_prompt(base, arm, blocks) for arm in arms}}
             write_json(root / 'contexts' / (cid + '.json'), c)
             contexts[cid] = c
     return contexts
@@ -255,17 +252,7 @@ def make_prompts(root, manifest):
 
 def candidate_job(arg):
     root, job = arg
-    root = Path(root)
-    path = root / 'candidates' / (job['id'] + '.json')
-    if path.exists():
-        return {'id': job['id'], 'cached': True}
-    c = read_json(root / 'contexts' / (job['context'] + '.json'))
-    cfg = cfg_for(job['seed'])
-    gen = Generator(root / 'requests_candidates', 'deepseek', 'deepseek-flash', cfg.temperature)
-    child = gen.generate(job['id'], c['prompts'][job['arm']], cfg)
-    write_json(path, {**job, 'child': asdict(child) if child else None,
-                     'parent_key': Policy(**c['parent']).key, 'valid': child is not None})
-    return {'id': job['id'], 'valid': child is not None}
+    return generate_candidate(root, job, job['arm'], generator_factory=Generator)
 
 
 
@@ -430,11 +417,14 @@ def main():
     parser.add_argument('--ranks', nargs='+', type=int, choices=RANKS, help='Parent ranks to freeze; defaults to 1, 3, 6.')
     parser.add_argument('--source', type=Path, help='Reuse recorded initial populations in place; only candidate generation calls the API.')
     parser.add_argument('--arms', nargs='+', choices=SCORE_ARMS, help='Freeze accurate mismatched, optionally followed by score.')
+    parser.add_argument('--arm', choices=SCORE_ARMS, help='Generate one condition; earlier condition batches must be complete.')
     args = parser.parse_args()
     if min(args.workers, args.api_workers) < 1:
         parser.error('Worker counts must be positive')
     root = Path(args.output)
     root.mkdir(parents=True, exist_ok=True)
+    if args.arm is not None and args.stage != 'generate':
+        parser.error('--arm belongs to the generate stage')
     if args.stage == 'freeze':
         manifest = freeze(root, args.seeds, args.ranks, args.source, args.arms)
         print(json.dumps({'frozen': manifest['implementation_hash'], 'requests': manifest['requested_calls']['total']}))
@@ -464,7 +454,7 @@ def main():
                 seal = make_prompts(root, manifest)
                 if not seal['rows']:
                     raise RuntimeError('Missing prompt seal')
-                pool_run(candidate_job, [(str(root), job) for job in manifest['jobs']], args.api_workers, root, phase)
+                generate_conditions(root, manifest, args.api_workers, candidate_job, args.arm)
             elif phase == 'select':
                 for job in manifest['jobs']:
                     read_json(root / 'candidates' / (job['id'] + '.json'))
@@ -472,11 +462,13 @@ def main():
                 identities += [('child', job['id']) for job in manifest['jobs']]
                 pool_run(evaluation_job, [(str(root), kind, identity) for kind, identity in identities], args.workers, root, phase, True)
                 seal_selections(root, manifest)
+                write_arm_logs(root, manifest)
             elif phase == 'holdout':
                 seal_selections(root, manifest)
                 release_holdout(root)
                 pool_run(holdout_job, [(str(root), 'parent', f's{seed}-rank{rank}') for seed in manifest['seeds'] for rank in manifest['ranks']], args.workers, root, 'holdout_parents', True)
                 pool_run(holdout_job, [(str(root), 'child', job['id']) for job in manifest['jobs']], args.workers, root, 'holdout_children', True)
+                write_arm_logs(root, manifest)
                 complete(root, initial=len(manifest['init_jobs']), candidates=len(manifest['jobs']),
                          contexts=len(manifest['seeds']) * len(manifest['ranks']))
 
