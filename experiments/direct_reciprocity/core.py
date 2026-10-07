@@ -4,7 +4,7 @@ from __future__ import annotations
 import ast
 import builtins
 from dataclasses import dataclass
-from tools.direct_reciprocity.records import digest
+from .records import digest
 import json
 import random
 import sys

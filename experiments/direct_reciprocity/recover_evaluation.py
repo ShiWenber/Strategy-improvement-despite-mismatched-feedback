@@ -7,7 +7,7 @@ the additional execution layer is recorded separately for every recovered run.
 import argparse
 from pathlib import Path
 from experiments.direct_reciprocity import run as runner
-from experiments.direct_reciprocity.core import Config, PolicyError, versus
+from .core import Config, PolicyError, versus
 from .records import digest
 from .records import implementation_hash
 

@@ -145,7 +145,7 @@ def test_missing_parameterized_input_does_not_fall_back_to_paper_data(tmp_path):
     import subprocess
     import sys
     output = tmp_path / 'summary.json'
-    result = subprocess.run([sys.executable, str(ROOT / 'results/model_comparison_20260928/cross_model_summary.py'),
+    result = subprocess.run([sys.executable, str(ROOT / 'experiments/direct_reciprocity/cross_model_summary.py'),
                              '--work', str(ROOT), '--analysis-suffix', '_missing', '--output', str(output)],
                             capture_output=True, text=True, cwd=ROOT)
     assert result.returncode != 0 and 'ANALYSIS_missing.json' in result.stderr

@@ -107,7 +107,7 @@ def test_old_analysis_entries_write_json_without_markdown(tmp_path, module, entr
     from importlib import import_module
     (tmp_path / 'matrix_plan.json').write_text('{"cells": []}', encoding='utf-8')
     (tmp_path / 'analysis.json').write_text('{"endpoints": [], "all_main_cells_complete": true}', encoding='utf-8')
-    result = getattr(import_module('tools.direct_reciprocity.' + module), entry)(tmp_path)
+    result = getattr(import_module('experiments.direct_reciprocity.' + module), entry)(tmp_path)
     assert json.loads((tmp_path / output).read_text(encoding='utf-8')) == result
     assert not list(tmp_path.glob('*.md'))
 
@@ -126,7 +126,7 @@ def test_specialized_analyses_preserve_reports_and_recompute_json(kind, tmp_path
         path.write_bytes(content)
 
     if kind == 'distance':
-        from tools.direct_reciprocity import mismatch_distance as analysis
+        from experiments.direct_reciprocity import mismatch_distance as analysis
         monkeypatch.setattr(sys, 'argv', ['mismatch_distance', '--root', str(ROOT),
                             '--docs', str(tmp_path), '--out-dir', str(tmp_path),
                             '--output-suffix', '_reproduct'])
@@ -141,7 +141,7 @@ def test_specialized_analyses_preserve_reports_and_recompute_json(kind, tmp_path
             for key in ('rows', 'distance_summary', 'weak_mismatch_sensitivity'):
                 assert actual[key] == expected[key]
     else:
-        from tools import judge_mismatch_detection_summary as analysis
+        from experiments.direct_reciprocity import judge_mismatch_detection_summary as analysis
         monkeypatch.setattr(analysis, 'OUT', tmp_path)
         output = tmp_path / 'jev_recount_reproduct.json'
         monkeypatch.setattr(sys, 'argv', ['judge_mismatch_detection_summary', 'report',

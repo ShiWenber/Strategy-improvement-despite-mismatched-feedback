@@ -4,7 +4,7 @@ from hashlib import sha256
 import json,re
 from matplotlib.text import Text
 from matplotlib.transforms import Bbox
-ROOT=Path(__file__).resolve().parents[2]
+ROOT=Path(__file__).resolve().parents[3]
 AUDIT=ROOT/'results/reproduction'
 WIDTH=175/25.4
 

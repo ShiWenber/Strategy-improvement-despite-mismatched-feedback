@@ -1,7 +1,7 @@
 """Independent diagnostics; neither behavioral probes nor test scores select parents."""
 from itertools import product
 from .core import act, RandomView, seed_for
-from tools.direct_reciprocity.records import digest
+from .records import digest
 
 
 def behavior_profile(policy):

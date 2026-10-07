@@ -1,9 +1,9 @@
 """Reuse only initial raw responses, with explicit provenance and new validation."""
 from pathlib import Path
 from dataclasses import replace
-from experiments.direct_reciprocity.core import Policy, match
+from .core import Policy, match
 from .records import digest
-from experiments.direct_reciprocity.baselines import TRAIN
+from .baselines import TRAIN
 
 
 def reuse_initial(source_directory, destination, request_id, cfg, provider, model, read_json, write_json):

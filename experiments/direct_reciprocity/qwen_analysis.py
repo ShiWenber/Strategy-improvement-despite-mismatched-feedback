@@ -8,11 +8,11 @@ import numpy as np
 WORKSPACE = Path(__file__).resolve().parents[2]
 ROOT = WORKSPACE / 'results/qwen3_8'
 
-from experiments.direct_reciprocity.core import Policy
+from .core import Policy
 from .records import digest, filehash
-from experiments.direct_reciprocity.qwen38_control import SOURCE, specification
+from .qwen38_control import SOURCE, specification
 from .records import read_json, write_json
-from tools.direct_reciprocity.specificity_analysis import contrast, holm
+from .specificity_analysis import contrast, holm
 from .thinking_control_analysis import aggregate
 
 

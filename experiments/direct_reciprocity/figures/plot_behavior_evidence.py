@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from statistics import mean
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 import numpy as np
 
 ROOTS = {
