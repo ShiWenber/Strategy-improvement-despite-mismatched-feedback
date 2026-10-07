@@ -8,11 +8,12 @@ from unittest.mock import patch
 
 from experiments.direct_reciprocity import specificity as runner
 from experiments.direct_reciprocity import specificity_analysis as analysis
+from experiments.direct_reciprocity import paired_control
 from experiments.direct_reciprocity.baselines import TRAIN
 from experiments.direct_reciprocity.core import Policy, Config
 from experiments.direct_reciprocity.records import digest
 from experiments.direct_reciprocity.records import write_json, read_json
-from experiments.direct_reciprocity.specificity_assets import probes
+from experiments.direct_reciprocity.specificity_assets import probes, ARMS, SCORE_ARMS
 
 
 class FakeGenerator:
@@ -45,6 +46,12 @@ def synthetic_holdout(candidate, cfg):
 
 class PipelineTest(unittest.TestCase):
     def test_frozen_flow_selects_without_holdout_and_audits(self):
+        self.exercise_flow(ARMS)
+
+    def test_score_flow_uses_the_same_generation_selection_and_analysis(self):
+        self.exercise_flow(SCORE_ARMS)
+
+    def exercise_flow(self, arms):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             with patch.object(runner, 'SEEDS', (901, 902)), patch.object(runner, 'RANKS', (1,)), \
@@ -52,7 +59,7 @@ class PipelineTest(unittest.TestCase):
                  patch.object(runner, 'evaluate', lambda pop, archive, cfg, gen: [{'fitness': i} for i in range(len(pop))]), \
                  patch.object(runner, 'measured_selection', synthetic_selection), \
                  patch.object(runner, 'holdout_measure', synthetic_holdout):
-                manifest = runner.freeze(root)
+                manifest = runner.freeze(root, arms=arms)
                 for job in manifest['init_jobs']:
                     runner.initial_job((str(root), job))
                 for seed in (901, 902):
@@ -67,8 +74,12 @@ class PipelineTest(unittest.TestCase):
                     runner.evaluation_job((str(root), kind, identity))
                 selection = runner.seal_selections(root, manifest)
                 self.assertTrue(all(r['accepted'] for r in selection['rows']))
-                self.assertEqual(manifest['arms'], ['accurate', 'mismatched'])
-                self.assertEqual(len(manifest['jobs']), 8)
+                self.assertEqual(manifest['arms'], list(arms))
+                self.assertEqual(len(manifest['jobs']), 4 * len(arms))
+                if 'score' in arms:
+                    context = read_json(root / 'contexts/s901-rank1.json')
+                    self.assertEqual(context['block_tokens']['score'], 0)
+                    self.assertIn('CUMULATIVE TRAINING FITNESS:', context['prompts']['score'])
                 self.assertFalse((root / 'holdout').exists())
                 write_json(root / 'H_RELEASED.json', {
                     'selection_digest': digest((root / 'SELECTIONS_SEALED.json').read_text(encoding='utf-8'))})
@@ -77,8 +88,20 @@ class PipelineTest(unittest.TestCase):
                 write_json(root / 'COMPLETE.json', {'synthetic': True})
                 result = analysis.analyze(root)
                 self.assertEqual(result['audit']['issues'], [])
-                self.assertEqual(result['audit']['n_requests'], 32)
+                self.assertEqual(result['audit']['n_requests'], 24 + 4 * len(arms))
                 self.assertEqual(result['selected']['S3/accurate']['metrics']['default']['mean'], -3)
+                if 'score' in arms:
+                    self.assertEqual(result['selected']['S3/score']['metrics']['default']['mean'], -3)
+                    for provider, name in [('deepseek', 'on'), ('qwen', 'qwen3_8/off'), ('qwen', 'qwen3_8/on')]:
+                        paired = root / name
+                        prepared = paired_control.prepare(paired, root, provider)
+                        self.assertEqual(prepared['arms'], list(SCORE_ARMS))
+                        self.assertEqual(prepared['new_calls'], 12)
+                        self.assertEqual(prepared['jobs'], manifest['jobs'])
+                        self.assertEqual(paired_control.verify(paired, root, provider), prepared)
+                        for job in prepared['jobs']:
+                            context = read_json(paired / 'contexts' / (job['context'] + '.json'))
+                            self.assertEqual(prepared['prompt_hashes'][job['id']], digest(context['prompts'][job['arm']]))
                 self.assertFalse((root / 'REPORT.md').exists())
 
                 reused = root / 'reused'

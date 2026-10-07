@@ -13,10 +13,12 @@ from .records import read_json, write_json
 from .specificity import seal_selections
 from .specificity_analysis import contrast, summarize, holm, behavior_delta
 from .thinking_control import DEFAULT_ROOT, SOURCE, specification
+from .restore_score import verify_restoration
 
 
 def audit(root, m, source=SOURCE):
     root = Path(root)
+    verify_restoration(root)
     issues, records = [], []
     release = read_json(root/'H_RELEASED.json')
     read_json(root/'COMPLETE.json')
