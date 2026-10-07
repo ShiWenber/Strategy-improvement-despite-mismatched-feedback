@@ -124,7 +124,7 @@ Command numbers refer to the block above. Main Tables I–II define the report c
 
 ## Optional new API generation
 
-Copy `.env.example` to `.env` and configure `DEEPSEEK_API_KEY`, `DEEPSEEK_API_BASE`, `QWEN_API_KEY` and `QWEN_API_BASE`. Run [tools/generate_api.sh](tools/generate_api.sh) with a POSIX shell (Git Bash on Windows):
+Copy `.env.example` to `.env` and configure `DEEPSEEK_API_KEY`, `DEEPSEEK_API_BASE`, `QWEN_API_KEY` and `QWEN_API_BASE`. Run [tools/generate_api.sh](tools/generate_api.sh) :
 
 ```sh
 sh tools/generate_api.sh

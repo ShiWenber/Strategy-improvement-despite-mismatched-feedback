@@ -57,8 +57,8 @@ def validate_panel_layout(fig,stem):
         assert not data_overlaps,(stem,ax.get_title(loc='left'),data_overlaps)
         legends.append({'panel':ax.get_title(loc='left'),'bbox_canvas_fraction':[b.x0/fig.bbox.width,b.y0/fig.bbox.height,b.x1/fig.bbox.width,b.y1/fig.bbox.height],'labels':labels,'overlapping_data':data_overlaps,'overlapping_annotations':overlaps})
     titles=[ax.get_title(loc='left') for ax in fig.axes]
-    assert all(re.fullmatch(r'\([a-z]\)',t) for t in titles),(stem,titles)
-    assert titles==[f'({chr(97+i)})' for i in range(len(titles))]
+    assert all(re.fullmatch(r'\([a-z]\)\s+\S[\s\S]*',t) for t in titles),(stem,titles)
+    assert [re.match(r'\(([a-z])\)',t)[1] for t in titles]==[chr(97+i) for i in range(len(titles))]
     expected={'figS1':6,'figS2':3,'figS3':2,'figS4':4,'figS5':4,'figS6':2}
     assert len(legends)==expected[stem]
     return {'minimum_font_pt':min(fonts),'maximum_font_pt':max(fonts),'out_of_canvas_text':outside,'legends':legends,'panel_titles':titles,'figure_legend_count':0,'legend_position':'one independent legend in the upper part of each lettered panel'}
