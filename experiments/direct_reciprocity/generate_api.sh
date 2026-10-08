@@ -1,11 +1,21 @@
 #!/bin/sh
 # Run the full API experiment and its analyses through the existing uv entry points.
 set -eu
+set -f
 
-if [ "$#" -gt 1 ]; then
-    printf 'Usage: %s [workspace]\n' "$0" >&2
+usage() {
+    printf 'Usage: %s [--arms "score accurate mismatched"] [workspace]\n' "$0" >&2
     exit 2
+}
+
+arms='score accurate mismatched'
+if [ "${1:-}" = "--arms" ]; then
+    [ "$#" -ge 2 ] || usage
+    arms=$2
+    shift 2
 fi
+[ "$#" -le 1 ] || usage
+case "${1:-}" in --*) usage ;; esac
 
 cd "$(dirname "$0")/../.."
 workspace=${1:-results/api_reproduct}
@@ -16,7 +26,8 @@ population_dir="$workspace/results/reciprocity_population_visuals_20260924"
 comparison_dir="$workspace/results/model_comparison_20260928"
 
 # DeepSeek OFF: new populations, parents and candidate responses.
-uv run python -m experiments.direct_reciprocity.specificity freeze --output "$off_dir"
+# Split the condition list into arguments; freeze validates it before API calls.
+uv run python -m experiments.direct_reciprocity.specificity freeze --output "$off_dir" --arms $arms
 uv run python -m experiments.direct_reciprocity.specificity all --output "$off_dir" --workers 12 --api-workers 8 --env-file .env
 uv run python -m experiments.direct_reciprocity.specificity_analysis "$off_dir" --output-suffix _reproduct
 uv run python -m experiments.direct_reciprocity.role_analysis "$off_dir" --analysis-file ANALYSIS_reproduct.json --output-suffix _reproduct

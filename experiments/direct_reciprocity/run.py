@@ -18,6 +18,33 @@ from .prompts import build_prompt
 from ..config.load_env import get_api_key, get_base_url, get_model
 
 
+def validate(record, identity, cfg):
+    """Reuse terminal outcomes or validate a newly received program against TRAIN."""
+    if record['status'] == 'invalid':
+        return None
+    if not record.get('content') or record.get('finish_reason') == 'length':
+        record.update(status='invalid', validation_error='Missing or truncated program output',
+                      error_kind='incomplete_response')
+        return None
+    code = record['content']
+    if code.strip().startswith('```'):
+        lines = code.strip().splitlines()
+        if lines[-1].strip() == '```':
+            code = '\n'.join(lines[1:-1])
+    policy = Policy(identity, code)
+    if record['status'] == 'valid':
+        return policy
+    try:
+        policy.compile()
+        for opponent in TRAIN:
+            match(policy, opponent, replace(cfg, repeats=1), 12345)
+    except Exception as exc:
+        record.update(status='invalid', validation_error=f'{type(exc).__name__}: {exc}')
+        return None
+    record.update(status='valid', code_hash=policy.key)
+    return policy
+
+
 class Generator:
     def __init__(self, directory, provider, model, temperature):
         self.directory = Path(directory)
@@ -53,30 +80,10 @@ class Generator:
                 raise RuntimeError('API failure '+type(exc).__name__+'; request saved at '+str(path)) from None
             record['finished_at']=time.time()
             write_json(path,record)
-        if record['status']=='invalid':
-            return None
-        if not record.get('content') or record.get('finish_reason') == 'length':
-            record.update(status='invalid', validation_error='Missing or truncated program output', error_kind='incomplete_response')
-            write_json(path,record)
-            return None
-        code=record.get('content') or ''
-        if code.strip().startswith('```'):
-            lines=code.strip().splitlines()
-            if lines[-1].strip()=='```':
-                code='\n'.join(lines[1:-1])
-        policy=Policy(request_id,code)
-        if record['status']=='valid':
-            return policy
-        try:
-            policy.compile()
-            for opponent in TRAIN:
-                match(policy,opponent,replace(cfg,repeats=1),12345)
-        except Exception as exc:
-            record.update(status='invalid',validation_error=f'{type(exc).__name__}: {exc}')
-            write_json(path,record)
-            return None
-        record.update(status='valid',code_hash=policy.key)
-        write_json(path,record)
+        status = record['status']
+        policy = validate(record, request_id, cfg)
+        if status != record['status']:
+            write_json(path, record)
         return policy
 
 

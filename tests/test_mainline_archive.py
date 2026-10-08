@@ -1,4 +1,4 @@
-"""Guard the published two-condition archive against stale-arm data leakage."""
+"""Guard the matching mainline and restored exploratory Score archive."""
 from collections import Counter
 import json
 from pathlib import Path
@@ -15,13 +15,13 @@ def read(path):
 
 
 @pytest.mark.parametrize('relative', RUNS)
-def test_archive_contains_only_complete_report_matching_pairs(relative):
+def test_archive_contains_complete_matching_and_score_pools(relative):
     root = ROOT / 'results' / relative
     manifest = read(root / 'manifest.json')
-    assert manifest['arms'] == ['accurate', 'mismatched']
+    assert manifest['arms'] == ['accurate', 'mismatched', 'score']
     jobs = manifest['jobs']
-    assert len(jobs) == 240
-    assert Counter(j['arm'] for j in jobs) == {'accurate': 120, 'mismatched': 120}
+    assert len(jobs) == 360
+    assert Counter(j['arm'] for j in jobs) == {'accurate': 120, 'mismatched': 120, 'score': 120}
     assert len({j['context'] for j in jobs}) == 60
     assert all(n == 2 for n in Counter((j['context'], j['arm']) for j in jobs).values())
     identities = {j['id'] for j in jobs}
@@ -31,8 +31,8 @@ def test_archive_contains_only_complete_report_matching_pairs(relative):
     for folder in ['holdout', 'selection_scores']:
         assert {p.stem for p in (root / folder).glob('*.json')} == identities | contexts
     selections = read(root / 'SELECTIONS_SEALED.json')['rows']
-    assert len(selections) == 360
-    assert {r['arm'] for r in selections} == {'accurate', 'mismatched'}
+    assert len(selections) == 540
+    assert {r['arm'] for r in selections} == set(manifest['arms'])
     for job in jobs:
         context = read(root / 'contexts' / (job['context'] + '.json'))
         request = read(root / 'requests_candidates' / (job['id'] + '.json'))
@@ -43,9 +43,56 @@ def test_archive_contains_only_complete_report_matching_pairs(relative):
         assert job['id'].endswith('pos' + str(job['position']))
 
 
+@pytest.mark.parametrize('relative', RUNS)
+def test_score_receipts_and_raw_population_contrasts_match_original_records(relative):
+    from experiments.direct_reciprocity.restore_score import verify_restoration
+    root = ROOT / 'results' / relative
+    verify_restoration(root)
+    receipt = read(root / 'SCORE_RESTORE.json')
+    assert len(receipt['imported_score_records']) == 480
+    assert receipt['new_model_calls'] == receipt['new_games'] == 0
+    manifest = read(root / 'manifest.json')
+    name = {'feedback_specificity_v2': 'DeepSeek/OFF',
+            'feedback_specificity_thinking_384k_20260923': 'DeepSeek/ON',
+            'qwen3_8/off': 'Qwen/OFF', 'qwen3_8/on': 'Qwen/ON'}[relative]
+    summary = read(ROOT / 'results/model_comparison_20260928/score_baseline_data_reproduct.json')['configurations'][name]
+    records = [read(root / 'holdout' / (job['id'] + '.json')) for job in manifest['jobs']]
+    for arm in ('accurate', 'mismatched'):
+        values = []
+        for seed in manifest['seeds']:
+            groups = [[r['delta']['default']['score'] for r in records if r['seed'] == seed and r['arm'] == a]
+                      for a in (arm, 'score')]
+            assert all(len(v) == 6 for v in groups)
+            values.append(sum(groups[0]) / 6 - sum(groups[1]) / 6)
+        actual = summary['comparisons']['raw'][arm + '_minus_score']
+        assert actual['seed_values'] == pytest.approx(values, abs=1e-12, rel=0)
+        assert actual['mean'] == pytest.approx(sum(values) / 20, abs=1e-12, rel=0)
+
+
+@pytest.mark.parametrize('relative', RUNS)
+def test_condition_data_logs_are_complete_and_preserve_original_records(relative):
+    from experiments.direct_reciprocity.records import filehash
+    root = ROOT / 'results' / relative
+    jobs = read(root / 'manifest.json')['jobs']
+    for arm in ('score', 'accurate', 'mismatched'):
+        with (root / 'arm_logs' / (arm + '.jsonl')).open(encoding='utf-8') as stream:
+            logged = [json.loads(line) for line in stream]
+        expected = {j['id']: j for j in jobs if j['arm'] == arm}
+        assert len(logged) == len(expected) == 120
+        assert {row['id'] for row in logged} == set(expected)
+        for row in logged:
+            assert row['job'] == expected[row['id']] and row['arm'] == arm
+            assert row['status'] in ('valid', 'invalid')
+            for folder, key in [('requests_candidates', 'request'), ('candidates', 'candidate'),
+                                ('selection_scores', 'selection_scores'), ('holdout', 'holdout')]:
+                relative_path = folder + '/' + row['id'] + '.json'
+                assert row[key] == read(root / relative_path)
+                assert row['record_sha256'][relative_path] == filehash(root / relative_path)
+
+
 def test_reasoning_annotations_match_the_retained_on_requests():
     jobs = read(ROOT / 'results/feedback_specificity_thinking_384k_20260923/manifest.json')['jobs']
-    identities = {j['id'] for j in jobs}
+    identities = {j['id'] for j in jobs if j['arm'] in ('accurate', 'mismatched')}
     for folder in ['judgments', 'summaries']:
         paths = list((ROOT / 'results/mismatch_detection_jev' / folder).glob('*.json'))
         assert {p.stem for p in paths} == identities
@@ -114,13 +161,24 @@ def test_paper_inputs_keep_their_recorded_hashes(record_property):
     ('population_gains', 640, '38ae40ec49586a64cb82dbdb16824c3be2964c12e16dd6b5281993b5b8ff7ab2'),
     ('condition_statistics', 32, '168505d95f2aa6504dcb3694523b16bf60d61496333db202b108189983bebac3'),
 ])
-def test_recomputed_csv_matches_full_precision_reference(name, rows, digest):
+def test_recomputed_csv_preserves_full_precision_matching_reference(name, rows, digest):
     import csv
     from hashlib import sha256
+    import io
     path = ROOT / 'results/model_comparison_20260928' / (name + '_reproduct.csv')
-    assert sha256(path.read_bytes()).hexdigest() == digest
     with path.open(encoding='utf-8', newline='') as handle:
-        assert sum(1 for _ in csv.DictReader(handle)) == rows
+        reader = csv.DictReader(handle)
+        fields = reader.fieldnames
+        values = list(reader)
+    matching = [r for r in values if r['arm'] in ('accurate', 'mismatched')]
+    buffer = io.StringIO(newline='')
+    writer = csv.DictWriter(buffer, fieldnames=fields)
+    writer.writeheader()
+    writer.writerows(matching)
+    assert sha256(buffer.getvalue().encode('utf-8')).hexdigest() == digest
+    assert len(matching) == rows
+    assert len(values) == rows * 3 // 2
+    assert {r['arm'] for r in values} == {'accurate', 'mismatched', 'score'}
 
 
 def test_cached_label_report_matches_paper_counts():

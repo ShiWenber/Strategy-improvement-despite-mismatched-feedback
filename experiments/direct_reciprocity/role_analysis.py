@@ -1,6 +1,7 @@
 """Post-hoc exact policy contrasts on sealed candidate pools; no API or game calls."""
 import argparse
 from .records import filehash
+from .specificity_assets import ARMS
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -95,7 +96,7 @@ def run(root, analysis_file="ANALYSIS.json", output_suffix=""):
     for arm in list(manifest['arms']) + ['pooled']:
         for rule in ('S1', 'S2', 'S3'):
             for setting in ('default', 'noise01', 'long'):
-                rows = [r for r in records if (arm == 'pooled' or r['arm'] == arm)
+                rows = [r for r in records if (r['arm'] in ARMS if arm == 'pooled' else r['arm'] == arm)
                         and r['rule'] == rule and r['setting'] == setting]
                 result = {metric: summarize([np.mean([r[metric] for r in rows if r['seed'] == seed])
                                              for seed in seeds]) for metric in metrics}
@@ -112,6 +113,7 @@ def run(root, analysis_file="ANALYSIS.json", output_suffix=""):
                   note='Exploratory unadjusted population-bootstrap intervals. No new model requests or games.',
                   bootstrap_seed=20260920, bootstrap_replicates=20000, independent_clusters=20,
                   counts=dict(counts), summaries=summaries, rows=records, input_sha256=hashes,
+                  pooled_arms=list(ARMS),
                   plan_sha256=filehash(plan),
                   verification=dict(policy_edge_cases='passed', sealed_decisions_reconstructed=len(sealed),
                                     frozen_raw_and_selected_seed_values='passed', decomposition_identity='passed'))

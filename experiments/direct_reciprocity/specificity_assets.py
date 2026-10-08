@@ -5,6 +5,30 @@ from .baselines import policy
 from .core import RandomView, act, seed_for
 
 ARMS = ('accurate', 'mismatched')
+SCORE_ARMS = ARMS + ('score',)
+GENERATION_ORDER = ('score', 'accurate', 'mismatched')
+
+
+def experiment_arms(arms=None):
+    """Validate the experiment's condition set independently of argument order."""
+    arms = tuple(SCORE_ARMS if arms is None else arms)
+    if len(set(arms)) != len(arms) or set(arms) not in (set(ARMS), set(SCORE_ARMS)):
+        raise ValueError('Require accurate and mismatched, with optional score; no duplicates or unknown conditions')
+    return tuple(arm for arm in SCORE_ARMS if arm in arms)
+
+
+def generation_arms(arms):
+    """Dispatch complete condition batches in a fixed, recorded order."""
+    return tuple(arm for arm in GENERATION_ORDER if arm in experiment_arms(arms))
+
+
+def information_prompt(base, arm, reports):
+    """The information condition changes only the appended behavioural report."""
+    if arm not in SCORE_ARMS:
+        raise ValueError('Unknown information condition: ' + arm)
+    block = '' if arm == 'score' else reports[arm]
+    return base + '\n' + block + '\nReturn only the new strategy source.\n'
+
 FAMILIES = ('recovery', 'exploitation', 'random', 'memory')
 SEEDS = tuple(range(200, 220))
 RANKS = (1, 3, 6)
