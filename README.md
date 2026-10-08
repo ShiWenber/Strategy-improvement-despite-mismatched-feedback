@@ -2,7 +2,7 @@
 
 This repository accompanies *Strategy improvement despite mismatched feedback: evolving direct reciprocity with large language models*. The project repository is [ShiWenber/Strategy-improvement-despite-mismatched-feedback](https://github.com/ShiWenber/Strategy-improvement-despite-mismatched-feedback).
 
-The paper compares **Accurate** and **Mismatched** reports while holding the parent strategy, population code, game rules and genuine training scores fixed. Accurate supplies the parent's own numerical behavioural report; Mismatched supplies another strategy's report from the same population. Candidate quality before selection is evaluated separately from the quality of externally selected outputs.
+The paper compares **Accurate** and **Mismatched** reports, with **Score** as a baseline, while holding the parent strategy, population code, game rules and genuine training scores fixed. Accurate supplies the parent's own numerical behavioural report; Mismatched supplies another strategy's report from the same population. Candidate quality before selection is evaluated separately from the quality of externally selected outputs.
 
 Only the English manuscript and its electronic supplementary material are maintained, in the local `paper_interface_focus/` project. Their figure inputs are under `paper_interface_focus/figures/`.
 
@@ -20,7 +20,7 @@ The analysis and figure/table commands below use recorded responses and cached l
 
 ## Paper data and file structure
 
-The data cover DeepSeek and Qwen in OFF/ON configurations, with Accurate, Mismatched and the restored **Score** condition in each configuration. Score retains the population code, parent strategy, game rules and genuine cumulative training scores, with an empty behavioural-report block. Accurate versus Mismatched remains the prespecified matching comparison; comparisons with Score are exploratory supplementary evidence.
+The data cover DeepSeek and Qwen in OFF/ON configurations, with **Score**, **Accurate** and **Mismatched** in each configuration. Score retains the population code, parent strategy, game rules and genuine cumulative training scores, with an empty behavioural-report block. Accurate versus Mismatched remains the prespecified matching comparison; comparisons with Score are exploratory supplementary evidence.
 
 Each model/configuration uses the same 20 populations and 60 parents, with two candidates per parent and condition: **360 candidates, 180 two-candidate pools and 540 S1/S2/S3 decisions** across the three conditions. The four configurations contain 1,440 candidate responses (960 matching-condition candidates and 480 Score candidates) and share the 240 DeepSeek OFF initialization responses. Mainline pooled summaries and figures explicitly use Accurate and Mismatched only: 240 candidates, 120 pools and 360 decisions per configuration. Additional models or configurations do not increase the number of independent populations.
 
@@ -51,7 +51,7 @@ Paths are relative to each experiment directory unless stated otherwise. ON and 
 | `SELECTIONS_SEALED.json` | 540 sealed decisions selecting a candidate or retaining the parent |
 | `holdout/<id>.json` | Payoff and independent behaviour measurements and gains over parents |
 | `ANALYSIS.json`, `AUDIT.json` | Reference analysis summaries |
-| `SCORE_RESTORE.json` | Historical source identity, imported Score paths and byte hashes of raw records; bound to the manifest |
+| `SCORE_RESTORE.json` | Source archive identity and byte hashes of Score records; bound to the manifest |
 | `arm_logs/score.jsonl`, `arm_logs/accurate.jsonl`, `arm_logs/mismatched.jsonl` | One consolidated data log per condition and model/configuration: task identity, complete request/response, usage, candidate validity, selection scores, holdout data and original record hashes |
 
 ## Reproduce each analysis
@@ -84,7 +84,7 @@ uv run python -m experiments.direct_reciprocity.judge_mismatch_detection_summary
 | 9. Cross-model summary | Four configurations and paired population vectors -> CSV/JSON in `results/model_comparison_20260928/` |
 | 10. Visible-reasoning labels | Cached judgments -> JSON in `results/mismatch_detection_jev/` |
 
-Step 9 exports the two-condition `cross_model_mainline_data_reproduct.json`, plus three-condition `candidate_gains_reproduct.csv`, `population_gains_reproduct.csv` and `condition_statistics_reproduct.csv`. It also exports `score_baseline_data_reproduct.json`, `score_baseline_statistics_reproduct.csv` and `score_baseline_population_pairs_reproduct.csv`. These contain Raw and S3 Accurate-minus-Score and Mismatched-minus-Score estimates paired within each of the 20 populations. Intervals are unadjusted population bootstrap intervals; no new confirmatory tests are introduced. Invalid candidates and evaluation failures retain the parent, with zero deployed gain, and are reported in the Score summary. Step 10 exports `jev_recount_reproduct.json` for the original matching conditions.
+Step 9 exports the matching-comparison `cross_model_mainline_data_reproduct.json`, plus three-condition `candidate_gains_reproduct.csv`, `population_gains_reproduct.csv` and `condition_statistics_reproduct.csv`. It also exports `score_baseline_data_reproduct.json`, `score_baseline_statistics_reproduct.csv` and `score_baseline_population_pairs_reproduct.csv`. These contain Raw and S3 Accurate-minus-Score and Mismatched-minus-Score estimates paired within each of the 20 populations. Intervals are unadjusted population bootstrap intervals; no new confirmatory tests are introduced. Invalid candidates and evaluation failures retain the parent, with zero deployed gain, and are reported in the Score summary. Step 10 exports `jev_recount_reproduct.json` for Accurate and Mismatched.
 
 Score prompts are shorter because the report block is absent. Consequently, contrasts with Score combine the presence of a report and its additional prompt length. They do not isolate report ownership or establish that models ignored mismatched reports.
 
@@ -128,45 +128,21 @@ uv run python -m experiments.direct_reciprocity.export_paper_tables --work . --a
 
 Command numbers refer to the block above. Main Tables I–II define the report conditions and S1/S2/S3 scoring; they contain fixed protocol definitions.
 
-## Historical Score restoration
-
-The checked-in archive already includes Score and reproduces without the original private repository. Original task IDs, response timestamps, raw bytes and historical implementation fingerprints are preserved. The restoration receipt records zero new model calls and zero new games. `results/reproduction/SCORE_MIGRATION_VALIDATION.json` records the independent comparison with the pre-migration matching statistics and CSVs.
-
-For a separate two-condition projection of the original archive, the migration entry point validates all four configurations before applying any changes:
-
-```powershell
-uv run python -m experiments.direct_reciprocity.restore_score --source 'C:\Users\shiwenbo\.minimax\agents\mavis\workspace\llm-reputation-paper\llm-reputation\.worktrees\direct-reciprocity'
-# Add --apply to install after validation. --work selects the destination checkout.
-```
-
-The source is read-only. Existing matching records must have identical byte hashes; missing Score records, conflicting destinations or a partial restore stop migration. A completed restore is idempotent. Backups of replaced containers are kept under ignored `tmp/score_restore_*/before/`. Historical experiment directories cannot resume new API generation; freeze a new output directory, optionally using `--source results/feedback_specificity_v2` to reuse its initialization.
-
 ## Optional new API generation
 
-Copy `.env.example` to `.env` and configure `DEEPSEEK_API_KEY`, `DEEPSEEK_API_BASE`, `QWEN_API_KEY` and `QWEN_API_BASE`. Set the experiment's information conditions with `--arms`:
+Copy `.env.example` to `.env` and configure `DEEPSEEK_API_KEY`, `DEEPSEEK_API_BASE`, `QWEN_API_KEY` and `QWEN_API_BASE`, then run:
 
 ```sh
-sh experiments/direct_reciprocity/generate_api.sh --arms "score accurate mismatched"
-# To run only the matching comparison in a separate workspace:
-sh experiments/direct_reciprocity/generate_api.sh --arms "accurate mismatched" results/api_reproduct_matching
+sh experiments/direct_reciprocity/generate_api.sh
 ```
 
-Information conditions are frozen experiment hyperparameters, recorded in `manifest.json` under `arms`. Both the shell script and the native `specificity freeze --arms score accurate mismatched` command default to all three conditions when `--arms` is omitted. Accurate and Mismatched are required by the paper analysis pipeline; Score can be omitted. Argument order does not change dispatch order. The selected set is inherited by DeepSeek ON and both Qwen modes.
+Every configuration includes **Score, Accurate and Mismatched by default**. These information conditions are frozen experiment hyperparameters, recorded in `manifest.json` under `arms` and shared by DeepSeek OFF/ON and Qwen OFF/ON.
 
-The three-condition run makes **1,680 planned API calls**: 240 initialization calls and 1,440 candidate calls. The two-condition run makes 1,200 calls. ON and Qwen reuse the new OFF parents and prompts. The script then runs the analyses and exports JSON, CSV and tables with `_reproduct` summary filenames.
+The run makes **1,680 planned API calls**: 240 initialization calls and 1,440 candidate calls. ON and Qwen reuse the new OFF parents and prompts. The script then runs the analyses and exports JSON, CSV and tables with `_reproduct` summary filenames.
 
-Outputs stay in `results/api_reproduct/` unless a workspace is supplied after the options. Use an empty directory for independent samples or a different condition set. Re-running the same workspace resumes from recorded responses and rejects changes to frozen conditions. New programs and results may differ from the published run.
+Outputs stay in `results/api_reproduct/`. To collect independent samples, supply an empty workspace, for example `sh experiments/direct_reciprocity/generate_api.sh results/api_reproduct_new`. Re-running the same workspace resumes from recorded responses. New programs and results may differ from the published run.
 
 Within **each model/configuration**, all **Score** requests finish before **Accurate**, followed by **Mismatched**. `--api-workers` controls concurrency within a condition; an API error prevents later conditions from starting. Parent and draw order is shared across conditions and shuffled within each batch. The manifest records `generation_order`. This fixed condition order differs from the historical randomized collection; historical IDs and collection records remain intact.
-
-The `generate` stage accepts `--arm` to run one condition, and checks that earlier conditions are complete:
-
-```sh
-uv run python -m experiments.direct_reciprocity.specificity generate --output results/api_reproduct/results/feedback_specificity_v2 --arm score --env-file .env
-uv run python -m experiments.direct_reciprocity.paired_control generate --provider qwen --output results/api_reproduct/results/qwen3_8/off --source results/api_reproduct/results/feedback_specificity_v2 --arm score --env-file .env
-```
-
-Paired generation uses the existing `prepare` and `first` checks before `generate` or `all`. The first check sends a request from the first condition, which is Score in a three-condition run.
 
 Each condition has one `arm_logs/<arm>.jsonl` file, refreshed after generation, selection and holdout. It contains one row per frozen task, including pending or failed requests. Per-request JSON and stream files remain the originals used by analyses; uncertain requests are never retried automatically.
 
