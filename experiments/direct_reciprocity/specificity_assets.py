@@ -10,11 +10,11 @@ GENERATION_ORDER = ('score', 'accurate', 'mismatched')
 
 
 def experiment_arms(arms=None):
-    """Keep the matching contrast in every batch, with an optional Score baseline."""
-    arms = tuple(ARMS if arms is None else arms)
-    if arms not in (ARMS, SCORE_ARMS):
-        raise ValueError('Use accurate mismatched, optionally followed by score')
-    return arms
+    """Validate the experiment's condition set independently of argument order."""
+    arms = tuple(SCORE_ARMS if arms is None else arms)
+    if len(set(arms)) != len(arms) or set(arms) not in (set(ARMS), set(SCORE_ARMS)):
+        raise ValueError('Require accurate and mismatched, with optional score; no duplicates or unknown conditions')
+    return tuple(arm for arm in SCORE_ARMS if arm in arms)
 
 
 def generation_arms(arms):

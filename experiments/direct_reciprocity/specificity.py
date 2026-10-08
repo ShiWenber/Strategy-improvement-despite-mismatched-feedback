@@ -410,7 +410,7 @@ def main():
     parser.add_argument('--seeds', nargs='+', type=int, help='Population seeds to freeze; defaults to the paper batch.')
     parser.add_argument('--ranks', nargs='+', type=int, choices=RANKS, help='Parent ranks to freeze; defaults to 1, 3, 6.')
     parser.add_argument('--source', type=Path, help='Reuse recorded initial populations in place; only candidate generation calls the API.')
-    parser.add_argument('--arms', nargs='+', choices=SCORE_ARMS, help='Freeze accurate mismatched, optionally followed by score.')
+    parser.add_argument('--arms', nargs='+', choices=SCORE_ARMS, help='Experiment information conditions; defaults to score accurate mismatched. Accurate and mismatched are required for the paper contrast.')
     parser.add_argument('--arm', choices=SCORE_ARMS, help='Generate one condition; earlier condition batches must be complete.')
     args = parser.parse_args()
     if min(args.workers, args.api_workers) < 1:

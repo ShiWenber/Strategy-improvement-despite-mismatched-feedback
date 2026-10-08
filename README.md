@@ -143,32 +143,32 @@ The source is read-only. Existing matching records must have identical byte hash
 
 ## Optional new API generation
 
-Copy `.env.example` to `.env` and configure `DEEPSEEK_API_KEY`, `DEEPSEEK_API_BASE`, `QWEN_API_KEY` and `QWEN_API_BASE`. Run [experiments/direct_reciprocity/generate_api.sh](experiments/direct_reciprocity/generate_api.sh) :
+Copy `.env.example` to `.env` and configure `DEEPSEEK_API_KEY`, `DEEPSEEK_API_BASE`, `QWEN_API_KEY` and `QWEN_API_BASE`. Set the experiment's information conditions with `--arms`:
 
 ```sh
-sh experiments/direct_reciprocity/generate_api.sh
-# Include Score in all four configurations:
-sh experiments/direct_reciprocity/generate_api.sh --with-score
+sh experiments/direct_reciprocity/generate_api.sh --arms "score accurate mismatched"
+# To run only the matching comparison in a separate workspace:
+sh experiments/direct_reciprocity/generate_api.sh --arms "accurate mismatched" results/api_reproduct_matching
 ```
 
-The default script generates two conditions: **1,200 planned API calls**, including 240 initialization calls and 960 candidate calls, before retries. `--with-score` generates three conditions: **1,680 planned API calls**, including the same 240 initialization calls and 1,440 candidate calls. ON and Qwen reuse the new OFF parents and prompts. It then runs the analyses and exports JSON, CSV and tables, retaining the `_reproduct` suffix for generated summaries. The individual freeze command supports `--arms accurate mismatched score`; omitting `--arms` keeps the two-condition default.
+Information conditions are frozen experiment hyperparameters, recorded in `manifest.json` under `arms`. Both the shell script and the native `specificity freeze --arms score accurate mismatched` command default to all three conditions when `--arms` is omitted. Accurate and Mismatched are required by the paper analysis pipeline; Score can be omitted. Argument order does not change dispatch order. The selected set is inherited by DeepSeek ON and both Qwen modes.
 
-Outputs stay in `results/api_reproduct/`, or `results/api_reproduct_score/` with Score. An optional workspace argument follows the flag, for example `sh experiments/direct_reciprocity/generate_api.sh --with-score results/api_reproduct_new`; start with an empty directory for independent samples. Re-running the same workspace resumes from recorded responses, and rejects a change in the frozen condition set. New programs and results may differ from the published run.
+The three-condition run makes **1,680 planned API calls**: 240 initialization calls and 1,440 candidate calls. The two-condition run makes 1,200 calls. ON and Qwen reuse the new OFF parents and prompts. The script then runs the analyses and exports JSON, CSV and tables with `_reproduct` summary filenames.
 
-Within **each model/configuration**, new candidate requests now complete **all Score**, then **all Accurate**, then **all Mismatched**. When Score is absent, Accurate precedes Mismatched. `--api-workers` controls concurrency within a condition; the next condition starts only after all active requests in the previous condition finish. An API error stops the batch and prevents later conditions from starting. Parent and draw order is shared across conditions and shuffled within each condition. The frozen manifest records `generation_order` and the new dispatch protocol; historical collection times, IDs and scheduling records remain intact. Fixed condition order is associated with collection time, so new runs use a different scheduling design from the historical randomized collection.
+Outputs stay in `results/api_reproduct/` unless a workspace is supplied after the options. Use an empty directory for independent samples or a different condition set. Re-running the same workspace resumes from recorded responses and rejects changes to frozen conditions. New programs and results may differ from the published run.
 
-The common `generate_candidate(root, job, arm, provider=..., mode=...)` function selects the condition's frozen prompt, sends the request and writes the candidate. `generate_conditions(root, manifest, workers, generate_one, arm=None)` runs one condition or all conditions in sequence; `candidate_job` is the shared worker for every provider and mode. Streaming and non-streaming requests share program validation. Provider settings, durable request caches and frozen request fingerprints are preserved.
+Within **each model/configuration**, all **Score** requests finish before **Accurate**, followed by **Mismatched**. `--api-workers` controls concurrency within a condition; an API error prevents later conditions from starting. Parent and draw order is shared across conditions and shuffled within each batch. The manifest records `generation_order`. This fixed condition order differs from the historical randomized collection; historical IDs and collection records remain intact.
 
 The `generate` stage accepts `--arm` to run one condition, and checks that earlier conditions are complete:
 
 ```sh
-uv run python -m experiments.direct_reciprocity.specificity generate --output results/api_reproduct_score/results/feedback_specificity_v2 --arm score --env-file .env
-uv run python -m experiments.direct_reciprocity.paired_control generate --provider qwen --output results/api_reproduct_score/results/qwen3_8/off --source results/api_reproduct_score/results/feedback_specificity_v2 --arm score --env-file .env
+uv run python -m experiments.direct_reciprocity.specificity generate --output results/api_reproduct/results/feedback_specificity_v2 --arm score --env-file .env
+uv run python -m experiments.direct_reciprocity.paired_control generate --provider qwen --output results/api_reproduct/results/qwen3_8/off --source results/api_reproduct/results/feedback_specificity_v2 --arm score --env-file .env
 ```
 
 Paired generation uses the existing `prepare` and `first` checks before `generate` or `all`. The first check sends a request from the first condition, which is Score in a three-condition run.
 
-Each condition's JSONL log is created at freeze/prepare time. Completed requests append snapshots, including failures and resumed responses; batch completion or failure compacts the log to exactly one row per frozen task, with pending tasks marked `pending`. Selection and holdout stages refresh these same files. Per-request JSON and stream files remain the durable originals used by analyses; uncertain requests are never retried automatically.
+Each condition has one `arm_logs/<arm>.jsonl` file, refreshed after generation, selection and holdout. It contains one row per frozen task, including pending or failed requests. Per-request JSON and stream files remain the originals used by analyses; uncertain requests are never retried automatically.
 
 Rebuild condition logs from existing records at any time, without API calls or changing recorded data:
 
