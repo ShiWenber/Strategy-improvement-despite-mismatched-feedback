@@ -13,15 +13,29 @@ from experiments.direct_reciprocity.core import Policy
 from experiments.direct_reciprocity.records import write_json, filehash, check_manifest, digest, read_json
 from experiments.direct_reciprocity.restore_score import verify_restoration
 from experiments.direct_reciprocity.specificity import freeze, seal_selections
-from experiments.direct_reciprocity.specificity_assets import SCORE_ARMS
+from experiments.direct_reciprocity.specificity_assets import ARMS, SCORE_ARMS, experiment_arms, generation_arms
 
 
 def test_frozen_conditions_reject_silent_resume_with_another_budget(tmp_path):
-    freeze(tmp_path, seeds=[901], ranks=[1])
+    freeze(tmp_path, seeds=[901], ranks=[1], arms=ARMS)
     with pytest.raises(ValueError, match='conditions differ'):
         freeze(tmp_path, arms=SCORE_ARMS)
-    with pytest.raises(ValueError, match='Use accurate mismatched'):
+    with pytest.raises(ValueError, match='Require accurate and mismatched'):
         freeze(tmp_path / 'invalid', arms=['score'])
+
+
+def test_information_conditions_are_frozen_parameters_with_a_three_arm_default(tmp_path):
+    manifest = freeze(tmp_path, seeds=[901], ranks=[1])
+    assert manifest['arms'] == list(SCORE_ARMS)
+    assert manifest['generation_order'] == ['score', 'accurate', 'mismatched']
+    assert manifest['requested_calls'] == {'initial': 12, 'candidates': 6, 'total': 18}
+    assert freeze(tmp_path, arms=['score', 'accurate', 'mismatched']) == manifest
+    assert experiment_arms(['mismatched', 'accurate']) == ARMS
+    assert generation_arms(['mismatched', 'score', 'accurate']) == ('score', 'accurate', 'mismatched')
+    for invalid in ([], ['score'], ['accurate', 'mismatched', 'score', 'score'],
+                    ['accurate', 'mismatched', 'background']):
+        with pytest.raises(ValueError, match='Require accurate and mismatched'):
+            experiment_arms(invalid)
 
 
 def test_historical_records_cannot_be_resumed_as_new_generation(tmp_path):

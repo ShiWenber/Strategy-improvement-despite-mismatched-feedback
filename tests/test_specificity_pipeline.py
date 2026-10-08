@@ -101,7 +101,7 @@ class PipelineTest(unittest.TestCase):
                 self.assertFalse((root / 'REPORT.md').exists())
 
                 reused = root / 'reused'
-                subset = runner.freeze(reused, seeds=[901], ranks=[1], source=root)
+                subset = runner.freeze(reused, seeds=[901], ranks=[1], source=root, arms=ARMS)
                 self.assertEqual(subset['requested_calls']['total'], 4)
                 self.assertEqual(runner.population_root(reused), root.resolve())
                 runner.make_prompts(reused, subset)
