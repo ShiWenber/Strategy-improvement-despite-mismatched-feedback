@@ -8,6 +8,9 @@ from pathlib import Path
 
 import numpy as np
 
+from experiments.direct_reciprocity.records import filehash
+from experiments.direct_reciprocity.specificity_analysis import summarize
+
 ROOT = Path(__file__).resolve().parents[2]
 
 # Where the frozen raw contrast lives. The Qwen top-level file holds only the
@@ -91,7 +94,7 @@ def export_csv(directory, analysis_suffix="", output_suffix=""):
                                    'valid': row['valid'], 'setting': setting,
                                    'fallback': row['fallback'][setting], 'gain_per_round': row['delta'][setting]['score'],
                                    'S3_selected': winners[job['context'], job['arm'], 'S3'] == job['id']})
-        for arm in ('accurate', 'mismatched'):
+        for arm in manifest['arms']:
             for stage in ['raw', 'S1', 'S2', 'S3']:
                 metric = stats['raw'][arm]['metrics']['default/score'] if stage == 'raw' else stats['selected'][stage + '/' + arm]['metrics']['default']
                 summaries.append({'configuration': config, 'arm': arm, 'stage': stage,
@@ -106,6 +109,74 @@ def export_csv(directory, analysis_suffix="", output_suffix=""):
             writer.writerows(rows)
 
 
+def score_baseline(analysis_suffix=''):
+    """Exploratory report-versus-Score contrasts paired within population seeds."""
+    configurations, hashes = {}, {}
+    for (model, mode), relative in RESULT_FILES.items():
+        root = ROOT / Path(relative).parent
+        manifest = read(root / 'manifest.json')
+        if 'score' not in manifest['arms']:
+            raise ValueError('Score records required in all four configurations')
+        payload = read(relative, analysis_suffix)
+        result = result_block(model, mode, payload)
+        seeds = manifest['seeds']
+        if len(set(seeds)) != len(seeds):
+            raise ValueError('Duplicate population seeds')
+        estimates = {}
+        for stage in ('raw', 'S3'):
+            def vector(arm):
+                metric = (result['raw'][arm]['metrics']['default/score'] if stage == 'raw'
+                          else result['selected']['S3/' + arm]['metrics']['default'])
+                values = np.asarray(metric['seed_values'], dtype=float)
+                if len(values) != len(seeds) or not np.isfinite(values).all():
+                    raise ValueError('Incomplete population vector: ' + arm)
+                return values
+            estimates[stage] = {arm + '_minus_score': summarize(vector(arm) - vector('score'))
+                                for arm in ('accurate', 'mismatched')}
+        score = result['raw']['score']
+        selection_failures = {rule: 0 for rule in ('S1', 'S2', 'S3')}
+        for job in manifest['jobs']:
+            if job['arm'] == 'score':
+                metrics = read(root / 'selection_scores' / (job['id'] + '.json'))['metrics']
+                for rule in selection_failures:
+                    selection_failures[rule] += metrics[rule]['status'] != 'ok'
+        configurations[model + '/' + mode.upper()] = {
+            'seed_ids': seeds, 'comparisons': estimates,
+            'score_raw_gain': score['metrics']['default/score'],
+            'score_s3_gain': result['selected']['S3/score']['metrics']['default'],
+            'candidates': score['n'], 'invalid': score['n'] - score['valid'],
+            'fallbacks': score['fallbacks'], 'selection_failures': selection_failures}
+        path = root / ('ANALYSIS' + analysis_suffix + '.json')
+        hashes[str(path.relative_to(ROOT)).replace('\\', '/')] = filehash(path)
+        hashes[str((root / 'manifest.json').relative_to(ROOT)).replace('\\', '/')] = filehash(root / 'manifest.json')
+    return {'configurations': configurations, 'source_sha256': hashes,
+            'exploratory': True, 'interval': 'Unadjusted 95% population percentile bootstrap; 20000 resamples; seed 2026091903',
+            'unit': 'Shared population clusters; two draws averaged within parent, three parents within population',
+            'fallback': 'Invalid outputs and test-specific execution failures retain parent; zero gain',
+            'interpretation': 'Added report includes content and extra prompt length; Score retains code, rules and genuine training scores',
+            'new_model_calls': 0, 'new_games': 0}
+
+
+def export_score_csv(report, directory, output_suffix=''):
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    rows, populations = [], []
+    for config, data in report['configurations'].items():
+        for stage, comparisons in data['comparisons'].items():
+            for name, metric in comparisons.items():
+                rows.append({'configuration': config, 'stage': stage, 'comparison': name,
+                             'mean': metric['mean'], 'ci95_low': metric['ci95'][0], 'ci95_high': metric['ci95'][1],
+                             'n_populations': metric['n_seeds'], 'exploratory': True})
+                populations.extend({'configuration': config, 'stage': stage, 'comparison': name,
+                                    'seed': seed, 'difference': value}
+                                   for seed, value in zip(data['seed_ids'], metric['seed_values']))
+    for stem, values in [('score_baseline_statistics', rows), ('score_baseline_population_pairs', populations)]:
+        with (directory / (stem + output_suffix + '.csv')).open('w', newline='', encoding='utf-8') as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(values[0]))
+            writer.writeheader()
+            writer.writerows(values)
+
+
 def main():
     global ROOT
     parser = argparse.ArgumentParser(description=__doc__)
@@ -114,6 +185,7 @@ def main():
     parser.add_argument('--output', type=Path)
     parser.add_argument('--csv-dir', type=Path, help='Also export candidate, population and condition CSVs.')
     parser.add_argument('--output-suffix', default='', help='Suffix for exported CSV filenames.')
+    parser.add_argument('--score-output', type=Path, help='Score supplementary JSON; requires Score in every configuration.')
     args = parser.parse_args()
     ROOT = args.work.resolve()
     statistics, sources = {}, {}
@@ -138,6 +210,14 @@ def main():
     destination.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     if args.csv_dir:
         export_csv(args.csv_dir, args.analysis_suffix, args.output_suffix)
+    score_available = ['score' in read(Path(relative).parent / 'manifest.json')['arms'] for relative in RESULT_FILES.values()]
+    if args.score_output or any(score_available):
+        score_report = score_baseline(args.analysis_suffix)
+        score_path = args.score_output or destination.parent / ('score_baseline_data' + args.analysis_suffix + '.json')
+        score_path.parent.mkdir(parents=True, exist_ok=True)
+        score_path.write_text(json.dumps(score_report, indent=2) + '\n', encoding='utf-8')
+        if args.csv_dir:
+            export_score_csv(score_report, args.csv_dir, args.output_suffix)
     print('Recomputed four model/configuration mainline summaries')
 
 

@@ -10,7 +10,8 @@ import numpy as np
 from .core import Policy
 from .records import digest, read_json, write_json, population_root
 from .specificity import DEFAULT_ROOT, init_prompt, seal_selections
-from .specificity_assets import ARMS
+from .specificity_assets import experiment_arms
+from .restore_score import verify_restoration
 
 
 def summarize(values):
@@ -50,6 +51,7 @@ def holm(ps):
 
 def audit(root, manifest):
     root = Path(root)
+    verify_restoration(root)
     issues, records = [], []
     populations = population_root(root, manifest)
     initial_frozen_at = read_json(populations / 'manifest.json')['frozen_at']
@@ -149,7 +151,7 @@ def analyze(root, output_suffix=""):
     for row in rows:
         row['behavior_delta'] = behavior_delta(row, parents[row['context']])
     raw, chosen = {}, {}
-    for arm in ARMS:
+    for arm in experiment_arms(manifest['arms']):
         arm_rows = [r for r in rows if r['arm'] == arm]
         metrics = {}
         for setting in ('default', 'noise01', 'long'):
@@ -228,7 +230,7 @@ def analyze(root, output_suffix=""):
                                    'ci95': np.quantile(coefficients, [.025, .975]).tolist() if coefficients else None,
                                    'identified_bootstrap_samples': len(coefficients), 'exploratory': True}
     disagreements = {}
-    for arm in ARMS:
+    for arm in experiment_arms(manifest['arms']):
         items = {(r['context'], r['rule']): r['winner'] for r in selected if r['arm'] == arm}
         disagreements[arm] = {a + '-' + b: sum(items[cid, a] != items[cid, b] for cid in parents)
                               for a, b in [('S1', 'S2'), ('S2', 'S3'), ('S1', 'S3')]}

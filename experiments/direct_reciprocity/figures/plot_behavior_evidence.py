@@ -58,13 +58,14 @@ def analyze(config, root, analysis_suffix=""):
     seal = read(root / 'SELECTIONS_SEALED.json')
     frozen = read(root / f'ANALYSIS{analysis_suffix}.json')
     expected = frozen['thinking'] if config == 'thinking' else frozen
-    selection = {(r['context'], r['arm']): r for r in seal['rows'] if r['rule'] == 'S3'}
+    selection = {(r['context'], r['arm']): r for r in seal['rows'] if r['rule'] == 'S3' and r['arm'] in ARMS}
     assert len(selection) == 120
     parent_ids = sorted({j['context'] for j in manifest['jobs']})
     parents = {cid: read(root / 'holdout' / f'{cid}.json') for cid in parent_ids}
-    children = {j['id']: read(root / 'holdout' / (j['id'] + '.json')) for j in manifest['jobs']}
+    matching_jobs = [j for j in manifest['jobs'] if j['arm'] in ARMS]
+    children = {j['id']: read(root / 'holdout' / (j['id'] + '.json')) for j in matching_jobs}
     jobs = defaultdict(list)
-    for j in manifest['jobs']:
+    for j in matching_jobs:
         jobs[(j['context'], j['arm'])].append(j)
     pool_rows = []
     for (context, arm), jj in sorted(jobs.items()):
