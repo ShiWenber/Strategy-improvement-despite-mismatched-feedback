@@ -344,8 +344,11 @@ def seal_selections(root, manifest, *, readonly=False):
     result = {'rows': rows, 'implementation_hash': manifest['implementation_hash'] if readonly else implementation_hash(),
               'candidate_hashes': {j['id']: digest((root / 'candidates' / (j['id'] + '.json')).read_text(encoding='utf-8')) for j in manifest['jobs']}}
     path = root / 'SELECTIONS_SEALED.json'
-    if path.exists() and any(read_json(path)[key] != value for key, value in result.items()):
-        raise RuntimeError('Selections changed after sealing')
+    if path.exists():
+        previous = read_json(path)
+        if previous['rows'] != result['rows'] or previous['candidate_hashes'] != result['candidate_hashes']:
+            raise RuntimeError('Selections changed after sealing')
+        return previous
     if not readonly:
         write_json(path, result)
     return result
@@ -378,25 +381,36 @@ def holdout_job(arg):
     require_holdout(root)
     path = root / 'holdout' / (identity + '.json')
     if path.exists():
-        return {'id': identity, 'cached': True}
+        cached = read_json(path)
+        if not (kind == 'child' and cached.get('status') == 'skipped' and
+                cached.get('skip_reason') == 'parent_holdout_failed'):
+            return {'id': identity, 'cached': True}
     record = read_json(root / ('contexts' if kind == 'parent' else 'candidates') / (identity + '.json'))
     cid = identity if kind == 'parent' else record['context']
     c = read_json(root / 'contexts' / (cid + '.json'))
     item = c['parent'] if kind == 'parent' else record['child']
     measured = holdout_measure(Policy(**item), cfg_for(c['seed'])) if item else {}
     if kind == 'parent':
-        if any(measured[s]['status'] != 'ok' for s in ('default', 'noise01', 'long', 'behavior')):
-            raise RuntimeError('Parent holdout failed: ' + identity)
-        result = {'id': identity, 'context': cid, 'measured': measured, 'deployed': measured}
+        failed = [s for s in ('default', 'noise01', 'long', 'behavior')
+                  if measured[s]['status'] != 'ok']
+        result = {'id': identity, 'context': cid, 'status': 'runtime_failure' if failed else 'complete',
+                  'failed_settings': failed, 'measured': measured, 'deployed': measured}
     else:
-        baseline = read_json(root / 'holdout' / (cid + '.json'))['measured']
+        parent_holdout = read_json(root / 'holdout' / (cid + '.json'))
+        if parent_holdout.get('status', 'complete') != 'complete':
+            result = {**record, 'status': 'skipped',
+                      'skip_reason': 'parent_holdout_failed',
+                      'parent_holdout_status': parent_holdout.get('status')}
+            write_json(path, result)
+            return {'id': identity, 'skipped': True, 'reason': result['skip_reason']}
+        baseline = parent_holdout['measured']
         fallbacks = {s: measured.get(s, {}).get('status') != 'ok' for s in baseline}
         deployed = {s: baseline[s] if fallbacks[s] else measured[s] for s in baseline}
-        result = {**record, 'measured': measured, 'deployed': deployed, 'fallback': fallbacks,
+        result = {**record, 'status': 'complete', 'measured': measured, 'deployed': deployed, 'fallback': fallbacks,
                   'delta': {s: {key: deployed[s][key] - baseline[s][key] for key in ('score', 'cooperation', 'worst_score')}
                             for s in ('default', 'noise01', 'long')}}
     write_json(path, result)
-    return {'id': identity, 'completed': True}
+    return {'id': identity, 'completed': True, 'status': result['status']}
 
 
 

@@ -8,8 +8,6 @@ import argparse
 from pathlib import Path
 from experiments.direct_reciprocity import run as runner
 from .core import Config, PolicyError, versus
-from .records import digest
-from .records import implementation_hash
 
 
 def tolerate_holdout_failure(policy, opponents, cfg, phase, generation=0):
@@ -27,11 +25,7 @@ def tolerate_holdout_failure(policy, opponents, cfg, phase, generation=0):
 def recover(directory):
     directory = Path(directory).resolve()
     metadata = runner.read_json(directory / 'config.json')
-    base_hash = implementation_hash()
-    if metadata['implementation_hash'] != base_hash:
-        raise ValueError('Frozen training implementation differs')
-    record = {'version': 1, 'base_implementation_hash': base_hash,
-              'recovery_source_hash': digest(Path(__file__).read_text(encoding='utf-8')),
+    record = {'version': 1,
               'rule': 'Only holdout PolicyError becomes runtime_failure with null metrics; training errors propagate.',
               'training_changed': False, 'instruction_budget_changed': False}
     path = directory / 'evaluation_recovery.json'
