@@ -385,18 +385,26 @@ def holdout_job(arg):
     item = c['parent'] if kind == 'parent' else record['child']
     measured = holdout_measure(Policy(**item), cfg_for(c['seed'])) if item else {}
     if kind == 'parent':
-        if any(measured[s]['status'] != 'ok' for s in ('default', 'noise01', 'long', 'behavior')):
-            raise RuntimeError('Parent holdout failed: ' + identity)
-        result = {'id': identity, 'context': cid, 'measured': measured, 'deployed': measured}
+        failed = [s for s in ('default', 'noise01', 'long', 'behavior')
+                  if measured[s]['status'] != 'ok']
+        result = {'id': identity, 'context': cid, 'status': 'runtime_failure' if failed else 'complete',
+                  'failed_settings': failed, 'measured': measured, 'deployed': measured}
     else:
-        baseline = read_json(root / 'holdout' / (cid + '.json'))['measured']
+        parent_holdout = read_json(root / 'holdout' / (cid + '.json'))
+        if parent_holdout.get('status') != 'complete':
+            result = {**record, 'status': 'skipped',
+                      'skip_reason': 'parent_holdout_failed',
+                      'parent_holdout_status': parent_holdout.get('status')}
+            write_json(path, result)
+            return {'id': identity, 'skipped': True, 'reason': result['skip_reason']}
+        baseline = parent_holdout['measured']
         fallbacks = {s: measured.get(s, {}).get('status') != 'ok' for s in baseline}
         deployed = {s: baseline[s] if fallbacks[s] else measured[s] for s in baseline}
-        result = {**record, 'measured': measured, 'deployed': deployed, 'fallback': fallbacks,
+        result = {**record, 'status': 'complete', 'measured': measured, 'deployed': deployed, 'fallback': fallbacks,
                   'delta': {s: {key: deployed[s][key] - baseline[s][key] for key in ('score', 'cooperation', 'worst_score')}
                             for s in ('default', 'noise01', 'long')}}
     write_json(path, result)
-    return {'id': identity, 'completed': True}
+    return {'id': identity, 'completed': True, 'status': result['status']}
 
 
 

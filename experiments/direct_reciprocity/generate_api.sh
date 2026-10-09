@@ -28,7 +28,7 @@ comparison_dir="$workspace/results/model_comparison_20260928"
 # DeepSeek OFF: new populations, parents and candidate responses.
 # Split the condition list into arguments; freeze validates it before API calls.
 uv run python -m experiments.direct_reciprocity.specificity freeze --output "$off_dir" --arms $arms
-uv run python -m experiments.direct_reciprocity.specificity all --output "$off_dir" --workers 12 --api-workers 8 --env-file .env
+uv run python -m experiments.direct_reciprocity.specificity all --output "$off_dir" --workers 48 --api-workers 20 --env-file .env
 uv run python -m experiments.direct_reciprocity.specificity_analysis "$off_dir" --output-suffix _reproduct
 uv run python -m experiments.direct_reciprocity.role_analysis "$off_dir" --analysis-file ANALYSIS_reproduct.json --output-suffix _reproduct
 
