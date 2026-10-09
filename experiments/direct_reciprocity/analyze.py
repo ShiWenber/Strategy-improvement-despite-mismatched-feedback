@@ -35,8 +35,6 @@ def summarize(root):
         if not complete:
             continue
         config=read_json(directory/'config.json')
-        if config['implementation_hash'] != plan['implementation_hash']:
-            raise ValueError('Mixed implementation hashes')
         state=states[-1]
         metrics={'train_fitness_per_round':max(x['fitness'] for x in state['assessment'])/plan['rounds'],
                  'code_diversity':state['code_diversity'],

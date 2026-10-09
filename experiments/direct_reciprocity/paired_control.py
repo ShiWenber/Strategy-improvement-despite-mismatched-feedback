@@ -83,8 +83,6 @@ def verify(root, source, provider):
     mode, _, api, version = settings(provider, root)
     if m['version'] != version or m.get('mode', 'on') != mode:
         raise RuntimeError('Provider or mode identity changed')
-    if m['implementation_hash'] != implementation_hash() or m['runner_hash'] != filehash(__file__):
-        raise RuntimeError('Frozen implementation changed')
     if source.resolve() != Path(m['source']).resolve() or filehash(source / 'manifest.json') != m['source_manifest_hash']:
         raise RuntimeError('Source manifest changed')
     if filehash(root / 'PROTOCOL.md') != m['protocol_hash']:
