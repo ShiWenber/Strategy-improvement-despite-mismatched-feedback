@@ -21,8 +21,10 @@ def test_experiments_are_self_contained_with_one_native_entry_point():
             if isinstance(node, ast.Import):
                 assert not any(alias.name.startswith('tools') for alias in node.names), path
     assert {p.name for p in (ROOT / 'tools').rglob('*.py')} == {'__init__.py', 'render_report.py'}
+    assert {p.name for p in (ROOT / 'tools').rglob('*.sh')} >= {'generate_api.sh', 'plot.sh'}
+    assert not (ROOT / 'experiments/direct_reciprocity/generate_api.sh').exists()
+    assert not (ROOT / 'experiments/direct_reciprocity/plot.sh').exists()
     assert specificity.initial_job.__module__ == specificity.main.__module__
-    assert (ROOT / 'experiments/direct_reciprocity/generate_api.sh').is_file()
 
 
 def test_exclusive_requests_resume_only_matching_finished_responses(tmp_path):

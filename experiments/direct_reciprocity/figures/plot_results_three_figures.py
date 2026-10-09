@@ -22,7 +22,7 @@ from matplotlib.text import Text
 from matplotlib.ticker import FuncFormatter
 from matplotlib.transforms import Bbox
 import numpy as np
-from .results_plot_style import apply_style, panel_heading, panel_legend, IntervalKey, BLUE, ORANGE, DARK, GREY
+from .results_plot_style import apply_style, panel_heading, panel_legend, IntervalKey, BLUE, ORANGE, DARK, GREY, GREEN
 READ_KEYS = {}
 ANALYSIS_SUFFIX = ""
 INPUTS = {}
@@ -38,7 +38,7 @@ def raw_tint(color):
 
 GAIN_COLORS = {'mismatched': (raw_tint(ORANGE), ORANGE),
                'accurate': (raw_tint(BLUE), BLUE),
-               'score': ('#9CD8C4', '#009E73')}
+               'score': (raw_tint(GREEN), GREEN)}
 GAIN_KEYS = [f'{stage}_{arm}' for arm in GAIN_CONDITIONS for stage in ['raw', 's3']]
 WIDTH, HEIGHT = (175 / 25.4, 138 / 25.4)
 
@@ -138,7 +138,6 @@ def register_style(fig, headings, legend_specs):
     fig._results_style = {'legends': legends, 'panel_headings': headings}
 
 def figure2(cross, pairs):
-    above_raw = sum(int(np.sum(pairs[cell]['S3'] > pairs[cell]['raw'])) for cell in ORDER)
     apply_style()
     fig = plt.figure(figsize=(WIDTH, HEIGHT), facecolor='white')
     axa = fig.add_axes([0.105, 0.605, 0.40, 0.30])
@@ -146,31 +145,24 @@ def figure2(cross, pairs):
     axb.set_ylim(3.55, -1.35)
     axb.set_yticks(range(4), [f'{DISPLAY_MODELS[model]}\n{mode}' for model, mode in (cell.split('/') for cell in ORDER)])
     clean(axb)
-    group_width = 0.72
-    bar_width = group_width / len(GAIN_KEYS)
-    offsets = np.linspace(-group_width / 2 + bar_width / 2,
-                          group_width / 2 - bar_width / 2, len(GAIN_KEYS))
-    for key, offset in zip(GAIN_KEYS, offsets):
+    for key, offset in zip(GAIN_KEYS, [-0.325, -0.215, -0.055, 0.055, 0.215, 0.325]):
         stage, arm = key.split('_')
         color = GAIN_COLORS[arm][stage == 's3']
         rows = [cross[cell][key] for cell in ORDER]
         means = np.asarray([row['mean'] for row in rows])
         intervals = np.asarray([row['ci95'] for row in rows])
-        axa.bar(np.arange(len(ORDER)) + offset, means, width=bar_width,
+        axa.bar(np.arange(4) + offset, means, width=0.10, color=color,
                 yerr=np.stack([means - intervals[:, 0], intervals[:, 1] - means]),
                 capsize=1, error_kw={'ecolor': 'black', 'elinewidth': 0.7, 'capthick': 0.7}, zorder=3)
     for index, cell in enumerate(ORDER):
         point_interval(axb, cross[cell]['raw_accurate_minus_mismatched'], index, DARK, 'o')
-    axa.set_xlim(-0.55, len(ORDER) - 0.45)
+    axa.set_xlim(-0.55, 3.55)
     axa.set_ylim(-0.02, 0.25)
     axa.set_yticks([0, 0.05, 0.1, 0.15, 0.2])
     axa.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f'{x:.2f}'))
-    axa.set_xticks(range(len(ORDER)), [cell.split('/')[1] for cell in ORDER])
-    for model in dict.fromkeys(cell.split('/')[0] for cell in ORDER):
-        indices = [index for index, cell in enumerate(ORDER)
-                   if cell.split('/')[0] == model]
-        axa.text(np.mean(indices), -0.20, DISPLAY_MODELS[model],
-                 transform=axa.get_xaxis_transform(),
+    axa.set_xticks(range(4), ['OFF', 'ON', 'OFF', 'ON'])
+    for model, center in [('DeepSeek', 0.5), ('Qwen', 2.5)]:
+        axa.text(center, -0.286, DISPLAY_MODELS[model], transform=axa.get_xaxis_transform(),
                  ha='center', va='top', fontsize=8.5)
     clean(axa, 'y')
     axa.set_ylabel('Payoff gain per round\nvs parent')
@@ -178,9 +170,9 @@ def figure2(cross, pairs):
     axb.set_xticks([-0.02, 0, 0.02])
     axb.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f'{x:.2f}'))
     axb.set_xlabel('Raw Accurate − Mismatched\n(payoff per round)')
-    headings = [panel_heading(fig, 'a', 'Mismatched: gains over parents', 0.025, 0.947),
+    headings = [panel_heading(fig, 'a', 'Three information conditions', 0.025, 0.947),
                 panel_heading(fig, 'b', 'Correct report matching', 0.535, 0.947),
-                panel_heading(fig, 'c', f'Same-pool selection: S3 above Raw in {above_raw} of {len(SEEDS) * len(ORDER)} population pairs', 0.025, 0.470)]
+                panel_heading(fig, 'c', 'Same-pool selection: S3 above Raw in 79 of 80 population pairs', 0.025, 0.470)]
     axb.text(1, 1.01, 'Accurate higher →', transform=axb.transAxes, ha='right', fontsize=8.5, color='#505050')
     lefts = [0.165, 0.3775, 0.59, 0.8025]
     for i, (cell, left) in enumerate(zip(ORDER, lefts)):
@@ -231,7 +223,7 @@ def figure2(cross, pairs):
         'panel_a': {'type': 'grouped vertical bars', 'configuration_order': ORDER,
                     'condition_order': GAIN_CONDITIONS, 'stage_order': ['Raw', 'S3'],
                     'colors': {arm: dict(zip(['Raw', 'S3'], GAIN_COLORS[arm])) for arm in GAIN_CONDITIONS},
-                    'estimator': f'Frozen mean payoff gain per round vs parent over {len(SEEDS)} populations',
+                    'estimator': 'Frozen mean payoff gain per round vs parent over 20 populations',
                     'interval': 'Frozen unadjusted 95% population-bootstrap confidence interval',
                     'bar_count': len(ORDER) * len(GAIN_KEYS)},
     }

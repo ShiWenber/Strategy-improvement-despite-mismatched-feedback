@@ -76,11 +76,13 @@ def configure_run(directory, cfg, provider, model, initial_source, train, test):
     return metadata
 
 
-def cached_request(path, specification):
+def cached_request(path, specification, retry_failed=False):
     path = Path(path)
     if not path.exists():
         return None
     record = read_json(path)
+    if record['status'] == 'api_error' and retry_failed:
+        return record
     if record['status'] in ('requested', 'api_error'):
         raise RuntimeError('Uncertain or failed saved request; inspect ' + str(path))
     return record
