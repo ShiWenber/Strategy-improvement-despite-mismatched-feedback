@@ -41,7 +41,7 @@ def validate(record, identity, cfg):
     except Exception as exc:
         record.update(status='invalid', validation_error=f'{type(exc).__name__}: {exc}')
         return None
-    record.update(status='valid', code_hash=policy.key)
+    record.update(status='valid')
     return policy
 
 

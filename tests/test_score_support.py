@@ -54,7 +54,7 @@ def test_score_estimates_are_population_paired_and_fail_closed_for_missing_arms(
             return manifest
         return dict(result, thinking=deepcopy(result), result=deepcopy(result))
 
-    with patch.object(summary, 'read', fake_read), patch.object(summary, 'filehash', return_value='fixture'):
+    with patch.object(summary, 'read', fake_read):
         report = summary.score_baseline()
         for data in report['configurations'].values():
             contrast = data['comparisons']['raw']['accurate_minus_score']

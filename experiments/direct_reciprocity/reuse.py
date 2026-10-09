@@ -40,7 +40,7 @@ def reuse_initial(source_directory, destination, request_id, cfg, provider, mode
             continue
         copied={**record,'status':'valid','original_status':record.get('status'),
                 'reused_from':str(path.resolve()),
-                'policy_code':code,'code_hash':policy.key,
+                'policy_code':code,
                 'reuse_note':'No new API request. Original prompt/response/usage preserved; initial policy revalidated under random-import interface.'}
         write_json(destination,copied)
         return policy

@@ -49,7 +49,7 @@ Paths are relative to each experiment directory unless stated otherwise. ON and 
 | `SELECTIONS_SEALED.json` | 540 sealed decisions selecting a candidate or retaining the parent |
 | `holdout/<id>.json` | Payoff and independent behaviour measurements and gains over parents |
 | `ANALYSIS.json`, `AUDIT.json` | Reference analysis summaries |
-| `arm_logs/score.jsonl`, `arm_logs/accurate.jsonl`, `arm_logs/mismatched.jsonl` | One consolidated data log per condition and model/configuration: task identity, complete request/response, usage, candidate validity, selection scores, holdout data and original record hashes |
+| `arm_logs/score.jsonl`, `arm_logs/accurate.jsonl`, `arm_logs/mismatched.jsonl` | One consolidated data log per condition and model/configuration: task identity, complete request/response, usage, candidate validity, selection scores and holdout data |
 
 ## Reproduce each analysis
 

@@ -1,4 +1,4 @@
-"""Render figures and audit fonts, bounds and source hashes; no analysis."""
+"""Render figures and audit fonts and bounds; no analysis."""
 from pathlib import Path
 import json,re
 from matplotlib.text import Text
