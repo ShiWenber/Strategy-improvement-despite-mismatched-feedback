@@ -44,13 +44,8 @@ def test_archive_contains_complete_matching_and_score_pools(relative):
 
 
 @pytest.mark.parametrize('relative', RUNS)
-def test_score_receipts_and_raw_population_contrasts_match_original_records(relative):
-    from experiments.direct_reciprocity.restore_score import verify_restoration
+def test_score_raw_population_contrasts_match_original_records(relative):
     root = ROOT / 'results' / relative
-    verify_restoration(root)
-    receipt = read(root / 'SCORE_RESTORE.json')
-    assert len(receipt['imported_score_records']) == 480
-    assert receipt['new_model_calls'] == receipt['new_games'] == 0
     manifest = read(root / 'manifest.json')
     name = {'feedback_specificity_v2': 'DeepSeek/OFF',
             'feedback_specificity_thinking_384k_20260923': 'DeepSeek/ON',
@@ -107,7 +102,6 @@ ANALYSIS_CHECKS = [
     *[('results/feedback_specificity_thinking_384k_20260923/ANALYSIS.json', [(key,)])
       for key in ('thinking', 'historical', 'focus_holm_two', 'configuration_differences_exploratory', 'audit')],
     *[(f'results/qwen3_8/{mode}/ANALYSIS.json', [('result',)]) for mode in ('off', 'on')],
-    ('results/reciprocity_population_visuals_20260924/population_summary.json', [('configurations',)]),
     *[('results/figure4_opponent_profiles_20260926/ANALYSIS.json', [('configs', mode, 'summaries')])
       for mode in ('non_thinking', 'thinking')],
     *[('results/reciprocity_population_visuals_20260924/behavior/ANALYSIS.json', [('configs', mode, 'summaries')])

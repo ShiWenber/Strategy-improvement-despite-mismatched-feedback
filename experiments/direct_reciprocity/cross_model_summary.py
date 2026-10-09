@@ -8,7 +8,6 @@ from pathlib import Path
 
 import numpy as np
 
-from experiments.direct_reciprocity.records import filehash
 from experiments.direct_reciprocity.specificity_analysis import summarize
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -111,7 +110,7 @@ def export_csv(directory, analysis_suffix="", output_suffix=""):
 
 def score_baseline(analysis_suffix=''):
     """Exploratory report-versus-Score contrasts paired within population seeds."""
-    configurations, hashes = {}, {}
+    configurations = {}
     for (model, mode), relative in RESULT_FILES.items():
         root = ROOT / Path(relative).parent
         manifest = read(root / 'manifest.json')
@@ -146,10 +145,7 @@ def score_baseline(analysis_suffix=''):
             'score_s3_gain': result['selected']['S3/score']['metrics']['default'],
             'candidates': score['n'], 'invalid': score['n'] - score['valid'],
             'fallbacks': score['fallbacks'], 'selection_failures': selection_failures}
-        path = root / ('ANALYSIS' + analysis_suffix + '.json')
-        hashes[str(path.relative_to(ROOT)).replace('\\', '/')] = filehash(path)
-        hashes[str((root / 'manifest.json').relative_to(ROOT)).replace('\\', '/')] = filehash(root / 'manifest.json')
-    return {'configurations': configurations, 'source_sha256': hashes,
+    return {'configurations': configurations,
             'exploratory': True, 'interval': 'Unadjusted 95% population percentile bootstrap; 20000 resamples; seed 2026091903',
             'unit': 'Shared population clusters; two draws averaged within parent, three parents within population',
             'fallback': 'Invalid outputs and test-specific execution failures retain parent; zero gain',

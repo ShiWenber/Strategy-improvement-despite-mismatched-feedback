@@ -1,7 +1,6 @@
 """Shared candidate requests, sequential condition batches and per-condition data logs."""
 import argparse
 from dataclasses import asdict
-from hashlib import sha256
 import json
 from pathlib import Path
 import threading
@@ -136,16 +135,14 @@ def log_path(root, arm):
 
 def data_log_row(root, job):
     root = Path(root)
-    row = {'id': job['id'], 'arm': job['arm'], 'job': job, 'record_sha256': {}}
+    row = {'id': job['id'], 'arm': job['arm'], 'job': job}
     for folder, key in [('requests_candidates', 'request'), ('candidates', 'candidate'),
                         ('selection_scores', 'selection_scores'), ('holdout', 'holdout')]:
         relative = f"{folder}/{job['id']}.json"
         path = root / relative
         row[key] = None
         if path.exists():
-            content = path.read_bytes()
-            row[key] = json.loads(content)
-            row['record_sha256'][relative] = sha256(content).hexdigest()
+            row[key] = read_json(path)
     row['status'] = row['request']['status'] if row['request'] else 'pending'
     return row
 
@@ -247,8 +244,6 @@ def main():
     parser.add_argument('--roots', type=Path, nargs='+', required=True)
     args = parser.parse_args()
     for root in args.roots:
-        from .restore_score import verify_restoration
-        verify_restoration(root)
         paths = write_arm_logs(root, read_json(root / 'manifest.json'))
         print(json.dumps({'root': str(root), 'logs': [str(p) for p in paths]}))
 

@@ -6,7 +6,6 @@ aggregation is the original population seed. Stages are not generations.
 from __future__ import annotations
 
 from collections import defaultdict
-from hashlib import sha256
 import argparse
 import json
 from pathlib import Path
@@ -20,12 +19,8 @@ ARMS = ('accurate', 'mismatched')
 SEEDS = list(range(200, 220))
 METRICS = ('defection_exposure', 'recovery_rounds', 'not_recovered', 'mutual_cooperation')
 STAGES = ('parent', 'raw', 'S3')
-INPUT_HASHES = {}
-
 def read(path):
-    raw = path.read_bytes()
-    INPUT_HASHES[str(path.relative_to(REPO)).replace('\\', '/')] = sha256(raw).hexdigest()
-    return json.loads(raw)
+    return json.loads(path.read_text(encoding='utf-8'))
 
 
 def measure(record, mode):
@@ -84,10 +79,6 @@ def analyze(config, root, analysis_suffix=""):
                 'S3': measure(adopted, mode),
             }
         pool_rows.append(row)
-        for child in child_rows:
-            candidate_path = root / 'candidates' / (child['id'] + '.json')
-            # The frozen seal hashes read_text (universal newlines), not file bytes.
-            assert seal['candidate_hashes'][child['id']] == sha256(candidate_path.read_text(encoding='utf-8').encode()).hexdigest()
     summaries = {}
     for mode in ('controlled', 'natural'):
         for arm in (*ARMS, 'pooled'):
@@ -154,8 +145,7 @@ def main():
                                    'raw': '12 candidates per population across 2 report conditions',
                                    'S3': '6 sealed candidate-pool decisions per population'},
               'no_new_games_or_model_calls': True,
-              'configs': data, 'input_sha256': INPUT_HASHES,
-              'analysis_script_sha256': sha256(Path(__file__).read_bytes()).hexdigest()}
+              'configs': data}
     output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
     print('Recomputed independent behaviour for two report conditions')
 

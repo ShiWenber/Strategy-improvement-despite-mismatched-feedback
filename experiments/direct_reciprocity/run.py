@@ -11,7 +11,7 @@ from .core import Config, Policy, evaluate, ranking, update_archive, versus, mat
 from .baselines import TRAIN, TEST
 from .diagnostics import population_behavior
 from .records import (read_json, write_json, initial_identity, request_budget,
-                                             configure_run, config_digest, cached_request, begin_request)
+                                             configure_run, cached_request, begin_request)
 from .reuse import reuse_initial
 from .selection import selection_plan
 from .prompts import build_prompt
@@ -128,7 +128,7 @@ def run(cfg, root, provider, model, initial_source=None):
             tests[label]=versus(champion,TEST,replace(cfg,rounds=rounds,noise=noise),
                                 'holdout-'+label,generation)
         fixed=versus(champion,TRAIN,cfg,'fixed',generation)
-        state={'status':'evaluated','generation':generation,'config_hash':config_digest(cfg),
+        state={'status':'evaluated','generation':generation,
                'population':[asdict(p) for p in population],'assessment':assessment,
                'archive_keys':[p.key for p in archive],'champion':asdict(champion),
                'fixed_baselines':fixed,'holdout':tests,
@@ -161,7 +161,7 @@ def run(cfg, root, provider, model, initial_source=None):
                           'fitness':max(r['fitness'] for r in assessment),
                           'holdout_score':tests['default']['score']},ensure_ascii=False),flush=True)
         population,archive=next_population,next_archive
-    write_json(directory/'complete.json',{'config_hash':config_digest(cfg),'generations':cfg.generations})
+    write_json(directory/'complete.json',{'generations':cfg.generations})
 
 
 def main():

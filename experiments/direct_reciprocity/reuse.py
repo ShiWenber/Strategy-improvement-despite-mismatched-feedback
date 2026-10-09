@@ -2,7 +2,6 @@
 from pathlib import Path
 from dataclasses import replace
 from .core import Policy, match
-from .records import digest
 from .baselines import TRAIN
 
 
@@ -40,7 +39,7 @@ def reuse_initial(source_directory, destination, request_id, cfg, provider, mode
         except Exception:
             continue
         copied={**record,'status':'valid','original_status':record.get('status'),
-                'reused_from':str(path.resolve()),'source_file_sha256':digest(path.read_text(encoding='utf-8-sig')),
+                'reused_from':str(path.resolve()),
                 'policy_code':code,'code_hash':policy.key,
                 'reuse_note':'No new API request. Original prompt/response/usage preserved; initial policy revalidated under random-import interface.'}
         write_json(destination,copied)

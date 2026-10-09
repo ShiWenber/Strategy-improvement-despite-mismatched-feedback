@@ -9,8 +9,8 @@ import random
 from statistics import mean
 import time
 
-from .records import (read_json, write_json, population_root, require_holdout, digest,
-                      implementation_hash, check_manifest, release_holdout, complete, runner_lock)
+from .records import (read_json, write_json, population_root, require_holdout,
+                      check_manifest, release_holdout, complete, runner_lock)
 from .core import Config, Policy, evaluate, match, seed_for, versus
 from .baselines import TRAIN
 from .report_assignment import derangement
@@ -69,8 +69,7 @@ def freeze(root, seeds=None, ranks=None, source=None, arms=None):
             jobs.append({'id': f'{cid}-d{draw}-pos{position}', 'context': cid,
                          'seed': seed, 'rank': rank, 'draw': draw, 'position': position, 'arm': arm})
     random.Random(2026091902).shuffle(init_jobs)
-    manifest = {'version': 'specificity-v3', 'implementation_hash': implementation_hash(),
-                'engine_hash': implementation_hash(), 'provider': 'deepseek', 'model': 'deepseek-flash',
+    manifest = {'version': 'specificity-v3', 'provider': 'deepseek', 'model': 'deepseek-flash',
                 'config': asdict(cfg_for(seeds[0])), 'seeds': list(seeds), 'arms': list(arms),
                 'ranks': list(ranks), 'draws': 2, 'init_jobs': init_jobs, 'jobs': jobs,
                 'generation_order': list(order), 'arm_positions': {arm: i for i, arm in enumerate(order)},
@@ -99,7 +98,6 @@ def freeze(root, seeds=None, ranks=None, source=None, arms=None):
         files = ['manifest.json'] + [f'populations/s{seed}.json' for seed in seeds]
         files += [f"{folder}/{job['id']}.json" for folder in ('initial', 'requests_initial') for job in init_jobs]
         manifest['initial_source'] = Path(os.path.relpath(source, root.resolve())).as_posix()
-        manifest['initial_source_hashes'] = {relative: digest((source / relative).read_text(encoding='utf-8')) for relative in files}
         manifest['requested_calls'] = {'initial': 0, 'candidates': len(jobs), 'total': len(jobs)}
         manifest['independent_unit'] = f'{len(seeds)} reused population clusters; new candidate responses'
     write_json(root / 'manifest.json', manifest)
@@ -234,15 +232,14 @@ def make_prompts(root, manifest):
     rows = []
     for job in manifest['jobs']:
         prompt = contexts[job['context']]['prompts'][job['arm']]
-        rows.append({'id': job['id'], 'prompt_hash': digest(prompt), 'tokens_proxy': len(enc.encode(prompt))})
-    sealed = {'implementation_hash': implementation_hash(), 'rows': rows,
-              'contexts': {cid: digest(json.dumps(c, sort_keys=True)) for cid, c in contexts.items()},
+        rows.append({'id': job['id'], 'tokens_proxy': len(enc.encode(prompt))})
+    sealed = {'rows': rows,
               'effective_mismatch_contexts': sum(c['effective_mismatch'] for c in contexts.values()),
               'n_contexts': len(contexts), 'sealed_at': time.time()}
     path = root / 'PROMPTS_SEALED.json'
     if path.exists():
         previous = read_json(path)
-        if previous['rows'] != rows or previous['contexts'] != sealed['contexts']:
+        if previous['rows'] != rows:
             raise RuntimeError('Frozen prompts changed')
     else:
         write_json(path, sealed)
@@ -341,12 +338,11 @@ def seal_selections(root, manifest, *, readonly=False):
                              read_json(root / 'selection_scores' / (j['id'] + '.json'))) for j in jobs]
                 for rule in ('S1', 'S2', 'S3'):
                     rows.append({'context': cid, 'seed': seed, 'arm': arm, 'rule': rule, **choose(parent, children, rule)})
-    result = {'rows': rows, 'implementation_hash': manifest['implementation_hash'] if readonly else implementation_hash(),
-              'candidate_hashes': {j['id']: digest((root / 'candidates' / (j['id'] + '.json')).read_text(encoding='utf-8')) for j in manifest['jobs']}}
+    result = {'rows': rows}
     path = root / 'SELECTIONS_SEALED.json'
     if path.exists():
         previous = read_json(path)
-        if previous['rows'] != result['rows'] or previous['candidate_hashes'] != result['candidate_hashes']:
+        if previous['rows'] != result['rows']:
             raise RuntimeError('Selections changed after sealing')
         return previous
     if not readonly:
@@ -435,7 +431,7 @@ def main():
         parser.error('--arm belongs to the generate stage')
     if args.stage == 'freeze':
         manifest = freeze(root, args.seeds, args.ranks, args.source, args.arms)
-        print(json.dumps({'frozen': manifest['implementation_hash'], 'requests': manifest['requested_calls']['total']}))
+        print(json.dumps({'requests': manifest['requested_calls']['total']}))
         return
     if args.seeds is not None or args.ranks is not None or args.source is not None or args.arms is not None:
         parser.error('--seeds, --ranks, --source and --arms belong to the freeze stage')

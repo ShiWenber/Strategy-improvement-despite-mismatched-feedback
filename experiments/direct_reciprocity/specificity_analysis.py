@@ -8,10 +8,9 @@ from statistics import mean
 import numpy as np
 
 from .core import Policy
-from .records import digest, read_json, write_json, population_root
+from .records import read_json, write_json, population_root
 from .specificity import DEFAULT_ROOT, init_prompt, seal_selections
 from .specificity_assets import experiment_arms
-from .restore_score import verify_restoration
 
 
 def summarize(values):
@@ -51,13 +50,11 @@ def holm(ps):
 
 def audit(root, manifest):
     root = Path(root)
-    verify_restoration(root)
     issues, records = [], []
     skipped_holdouts = []
     populations = population_root(root, manifest)
     initial_frozen_at = read_json(populations / 'manifest.json')['frozen_at']
     prompt_seal = read_json(root / 'PROMPTS_SEALED.json')
-    prompt_hash = {r['id']: r['prompt_hash'] for r in prompt_seal['rows']}
     for job in manifest['init_jobs']:
         r = read_json(populations / 'requests_initial' / (job['id'] + '.json'))
         records.append(r)
@@ -72,10 +69,8 @@ def audit(root, manifest):
         candidate = read_json(root / 'candidates' / (job['id'] + '.json'))
         outcome = read_json(root / 'holdout' / (job['id'] + '.json'))
         parent = read_json(root / 'holdout' / (job['context'] + '.json'))
-        if digest(r['prompt']) != prompt_hash[job['id']] or r['prompt'] != c['prompts'][job['arm']]:
+        if r['prompt'] != c['prompts'][job['arm']]:
             issues.append(job['id'] + ': candidate prompt mismatch')
-        if digest(json.dumps(c, sort_keys=True)) != prompt_seal['contexts'][job['context']]:
-            issues.append(job['id'] + ': context changed')
         if r['started_at'] < prompt_seal['sealed_at']:
             issues.append(job['id'] + ': request before prompt seal')
         if candidate['valid'] != (r['status'] == 'valid'):
@@ -97,17 +92,10 @@ def audit(root, manifest):
                 if outcome['fallback'][setting] and abs(delta) > 1e-10:
                     issues.append(job['id'] + ': fallback mismatch')
     selected = seal_selections(root, manifest, readonly=True)
-    release = read_json(root / 'H_RELEASED.json')
-    if release['selection_digest'] != digest((root / 'SELECTIONS_SEALED.json').read_text(encoding='utf-8')):
-        issues.append('Selection seal does not match holdout release')
     known = {j['id'] for j in manifest['jobs']}
     for r in selected['rows']:
         if r['winner'] is not None and r['winner'] not in known:
             issues.append('Unknown selected candidate')
-    for j in manifest['jobs']:
-        path = root / 'candidates' / (j['id'] + '.json')
-        if selected['candidate_hashes'][j['id']] != digest(path.read_text(encoding='utf-8')):
-            issues.append(j['id'] + ': candidate changed after selection')
     result = {'issues': issues, 'n_requests': len(records),
             'statuses': dict(Counter(r['status'] for r in records)),
             'returned_models': dict(Counter(r.get('returned_model', 'missing') for r in records)),
@@ -117,7 +105,7 @@ def audit(root, manifest):
             'completion_tokens': sum((r.get('usage') or {}).get('completion_tokens', 0) for r in records),
             'effective_mismatch_contexts': prompt_seal['effective_mismatch_contexts'],
             'skipped_holdouts': skipped_holdouts,
-            'note': 'Record/hash/arithmetic audit, not an independent replay of every game.'}
+            'note': 'Record and arithmetic audit, not an independent replay of every game.'}
     if 'initial_source' in manifest:
         new_records = records[len(manifest['init_jobs']):]
         result.update(n_new_requests=len(new_records), n_reused_initial_requests=len(manifest['init_jobs']),

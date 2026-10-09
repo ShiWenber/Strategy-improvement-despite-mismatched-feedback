@@ -1,6 +1,5 @@
 """Render figures and audit fonts, bounds and source hashes; no analysis."""
 from pathlib import Path
-from hashlib import sha256
 import json,re
 from matplotlib.text import Text
 from matplotlib.lines import Line2D
@@ -77,8 +76,7 @@ def render_audit(fig,stem,inputs,script,legend_labels,notes=None, *, output_dir=
     outputs={}
     for ext in ('pdf','svg','png'):
         p=source/f'{stem}.{ext}'; fig.savefig(p,dpi=600,facecolor='white')
-        digest=sha256(p.read_bytes()).hexdigest()
-        outputs[ext]={'sha256':digest,'path':path_label(p)}
-    record={'figure':stem,'scope':'Frozen-data rendering only','new_model_calls':0,'new_games':0,'new_bootstrap':0,'new_fits':0,'new_tests':0,'width_mm':175,'figure_inches':[fig.get_figwidth(),fig.get_figheight()],'panel_font_pt':9.5,'legend_font_pt':8.5,**layout,'legend_labels':legend_labels,'inputs_sha256':{path_label(p):sha256(Path(p).read_bytes()).hexdigest() for p in [*inputs,Path(__file__),Path(__file__).with_name('results_plot_style.py')]},'script_sha256':sha256(Path(script).read_bytes()).hexdigest(),'outputs':outputs,'notes':notes or [],'visual_qa':'pending'}
+        outputs[ext]={'path':path_label(p)}
+    record={'figure':stem,'scope':'Frozen-data rendering only','new_model_calls':0,'new_games':0,'new_bootstrap':0,'new_fits':0,'new_tests':0,'width_mm':175,'figure_inches':[fig.get_figwidth(),fig.get_figheight()], 'panel_font_pt':9.5,'legend_font_pt':8.5,**layout,'legend_labels':legend_labels,'outputs':outputs,'notes':notes or [],'visual_qa':'pending'}
     (audit/f'{stem}_audit_reproduct.json').write_text(json.dumps(record,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')
     return record
