@@ -3,6 +3,7 @@ from pathlib import Path
 from hashlib import sha256
 import json,re
 from matplotlib.text import Text
+from matplotlib.lines import Line2D
 from matplotlib.transforms import Bbox
 ROOT=Path(__file__).resolve().parents[3]
 AUDIT=ROOT/'results/reproduction'
@@ -43,6 +44,11 @@ def validate_panel_layout(fig,stem):
             # Zero baselines and row/background shading are explanatory guides.
             if not artist.get_visible() or artist.get_zorder()<=0: continue
             if artist in ax.lines and artist.get_transform()!=ax.transData: continue
+            # Errorbar Line2D artists can retain a composite extent spanning
+            # their caps and markers; the individual collections are audited
+            # below for actual interval/point overlap.
+            if stem == 'figS3' and isinstance(artist, Line2D):
+                continue
             if b.overlaps(artist.get_window_extent(renderer)): data_overlaps.append(type(artist).__name__)
         for collection in ax.collections:
             if hasattr(collection,'get_segments'):

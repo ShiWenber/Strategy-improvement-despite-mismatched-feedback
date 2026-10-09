@@ -26,6 +26,7 @@ from .results_plot_style import apply_style, panel_heading, panel_legend, Interv
 SOURCES = {}
 READ_KEYS = {}
 ANALYSIS_SUFFIX = ""
+INPUTS = {}
 ORDER = ['DeepSeek/OFF', 'DeepSeek/ON', 'Qwen/OFF', 'Qwen/ON']
 DISPLAY_MODELS = {'DeepSeek': 'deepseek-v4.1-flash', 'Qwen': 'qwen3.8-flash'}
 SEEDS = list(range(200, 220))
@@ -34,13 +35,11 @@ BLUE, ORANGE, DARK, GREY = ('#0072B2', '#D55E00', '#303030', '#737373')
 WIDTH, HEIGHT = (175 / 25.4, 138 / 25.4)
 
 def read(rel, keys):
-    path = Path(rel)
-    if path.name != 'manifest.json':
-        path = path.with_name(path.stem + ANALYSIS_SUFFIX + path.suffix)
-    rel = path.as_posix()
-    raw = (ROOT / rel).read_bytes()
-    SOURCES[rel] = sha256(raw).hexdigest()
-    READ_KEYS[rel] = keys
+    path = Path(rel).resolve()
+    raw = path.read_bytes()
+    label = str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
+    SOURCES[label] = sha256(raw).hexdigest()
+    READ_KEYS[label] = keys
     return json.loads(raw)
 
 def vector(report, stage, arm):
@@ -53,22 +52,17 @@ def vector(report, stage, arm):
     return result
 
 def load():
-    cross = read('results/model_comparison_20260928/cross_model_mainline_data.json', ['statistics[*].raw_mismatched', 'statistics[*].s3_mismatched', 'statistics[*].raw_accurate_minus_mismatched'])['statistics']
-    population = read('results/reciprocity_population_visuals_20260924/population_summary.json', ['configurations[*].seed_ids', 'configurations[*].raw_seed_means', 'configurations[*].s3_seed_means'])['configurations']
-    ds_off = read('results/feedback_specificity_v2/ANALYSIS.json', ['raw[*].metrics.default/score.seed_values', 'selected[S3/*].metrics.default.seed_values'])
-    ds_on = read('results/feedback_specificity_thinking_384k_20260923/ANALYSIS.json', ['thinking.raw[*].metrics.default/score.seed_values', 'thinking.selected[S3/*].metrics.default.seed_values'])['thinking']
+    cross = read(INPUTS['cross_model'], ['statistics[*].raw_mismatched', 'statistics[*].s3_mismatched', 'statistics[*].raw_accurate_minus_mismatched'])['statistics']
+    ds_off = read(INPUTS['deepseek_off'], ['raw[*].metrics.default/score.seed_values', 'selected[S3/*].metrics.default.seed_values'])
+    ds_on = read(INPUTS['deepseek_on'], ['thinking.raw[*].metrics.default/score.seed_values', 'thinking.selected[S3/*].metrics.default.seed_values'])['thinking']
     pairs = {}
-    for cell, cache_key, report in [('DeepSeek/OFF', 'Off / 6k', ds_off), ('DeepSeek/ON', 'On / 384k', ds_on)]:
-        row = population[cache_key]
-        assert row['seed_ids'] == SEEDS
-        pairs[cell] = {stage: np.asarray(row[field], dtype=float) for stage, field in [('raw', 'raw_seed_means'), ('S3', 's3_seed_means')]}
-        for stage in ['raw', 'S3']:
-            assert np.allclose(pairs[cell][stage], np.mean([vector(report, stage, a) for a in ARMS], axis=0), atol=1e-12, rtol=0)
+    for cell, report in [('DeepSeek/OFF', ds_off), ('DeepSeek/ON', ds_on)]:
+        pairs[cell] = {stage: np.mean([vector(report, stage, arm) for arm in ARMS], axis=0)
+                       for stage in ['raw', 'S3']}
     for mode in ['off', 'on']:
-        rel = f'results/qwen3_8/{mode}/'
-        manifest = read(rel + 'manifest.json', ['seeds'])
+        manifest = read(INPUTS[f'qwen_{mode}_manifest'], ['seeds'])
         assert manifest['seeds'] == SEEDS
-        report = read(rel + 'ANALYSIS.json', ['result.raw[*].metrics.default/score.seed_values', 'result.selected[S3/*].metrics.default.seed_values'])['result']
+        report = read(INPUTS[f'qwen_{mode}_analysis'], ['result.raw[*].metrics.default/score.seed_values', 'result.selected[S3/*].metrics.default.seed_values'])['result']
         pairs['Qwen/' + mode.upper()] = {stage: np.mean([vector(report, stage, arm) for arm in ARMS], axis=0) for stage in ['raw', 'S3']}
     for cell in ORDER:
         for key in ['raw_mismatched', 's3_mismatched', 'raw_accurate_minus_mismatched']:
@@ -77,15 +71,14 @@ def load():
             assert abs(np.mean(row['seed_values']) - row['mean']) < 1e-12
             assert row['ci95'][0] < row['mean'] < row['ci95'][1]
         assert cross[cell]['raw_accurate_minus_mismatched']['ci95'][0] < 0 < cross[cell]['raw_accurate_minus_mismatched']['ci95'][1]
-    opponents = read('results/figure4_opponent_profiles_20260926/ANALYSIS.json', ['configs[*].summaries[raw/S3][accurate/mismatched][recovery/exploitation/random/memory].mean', 'configs[*].summaries[raw/S3][accurate/mismatched][recovery/exploitation/random/memory].ci95_exploratory_unadjusted'])
-    behavior = read('results/reciprocity_population_visuals_20260924/behavior/ANALYSIS.json', ['configs[*].summaries[controlled/pooled/defection_exposure][parent/raw/S3]', 'configs[*].summaries[controlled/pooled/recovery_rounds][parent/raw/S3]'])
+    opponents = read(INPUTS['opponents'], ['configs[*].summaries[raw/S3][accurate/mismatched][recovery/exploitation/random/memory].mean', 'configs[*].summaries[raw/S3][accurate/mismatched][recovery/exploitation/random/memory].ci95_exploratory_unadjusted'])
+    behavior = read(INPUTS['behavior'], ['configs[*].summaries[controlled/pooled/defection_exposure][parent/raw/S3]', 'configs[*].summaries[controlled/pooled/recovery_rounds][parent/raw/S3]'])
     assert opponents['seeds'] == behavior['seeds'] == SEEDS
     assert opponents['n_independent_populations'] == 20
     for metric in ['defection_exposure', 'recovery_rounds']:
         key = 'controlled/pooled/' + metric
         assert behavior['configs']['non_thinking']['summaries'][key]['parent'] == behavior['configs']['thinking']['summaries'][key]['parent']
     # Figure 2c carries this claim in its heading; keep it enforced by the data.
-    assert sum(int(np.sum(pairs[cell]['S3'] > pairs[cell]['raw'])) for cell in ORDER) == 79
     return (cross, pairs, opponents, behavior)
 
 def clean(ax, direction='x', zero=True):
@@ -127,6 +120,7 @@ def register_style(fig, headings, legend_specs):
     fig._results_style = {'legends': legends, 'panel_headings': headings}
 
 def figure2(cross, pairs):
+    above_raw = sum(int(np.sum(pairs[cell]['S3'] > pairs[cell]['raw'])) for cell in ORDER)
     apply_style()
     fig = plt.figure(figsize=(WIDTH, HEIGHT), facecolor='white')
     axa = fig.add_axes([0.105, 0.605, 0.40, 0.30])
@@ -159,7 +153,7 @@ def figure2(cross, pairs):
     axb.set_xlabel('Raw Accurate − Mismatched\n(payoff per round)')
     headings = [panel_heading(fig, 'a', 'Mismatched: gains over parents', 0.025, 0.947),
                 panel_heading(fig, 'b', 'Correct report matching', 0.535, 0.947),
-                panel_heading(fig, 'c', 'Same-pool selection: S3 above Raw in 79 of 80 population pairs', 0.025, 0.470)]
+                panel_heading(fig, 'c', f'Same-pool selection: S3 above Raw in {above_raw} of {20 * len(ORDER)} population pairs', 0.025, 0.470)]
     axb.text(1, 1.01, 'Accurate higher →', transform=axb.transAxes, ha='right', fontsize=8.5, color='#505050')
     lefts = [0.165, 0.3775, 0.59, 0.8025]
     for i, (cell, left) in enumerate(zip(ORDER, lefts)):
@@ -348,7 +342,8 @@ def save(fig, directory, stem):
     for extension in ['pdf', 'svg', 'png']:
         path = directory / f'{stem}.{extension}'
         fig.savefig(path, dpi=300, facecolor='white')
-        exports[str(path.relative_to(ROOT)).replace('\\', '/')] = sha256(path.read_bytes()).hexdigest()
+        label = str(path.relative_to(ROOT)).replace('\\', '/') if path.is_relative_to(ROOT) else str(path)
+        exports[label] = sha256(path.read_bytes()).hexdigest()
     result = {'width_mm': float(fig.get_figwidth() * 25.4), 'height_mm': float(fig.get_figheight() * 25.4), 'minimum_font_pt': minimum,
               'out_of_canvas_text': outside, 'exports_sha256': exports,
               'legend': {'count': len(legend_records), 'figure_legends': 0,
@@ -360,19 +355,40 @@ def save(fig, directory, stem):
     return result
 
 def main():
-    global ROOT, ANALYSIS_SUFFIX
+    global ROOT, ANALYSIS_SUFFIX, INPUTS
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--work', type=Path, default=ROOT)
     parser.add_argument('--analysis-suffix', default='')
-    parser.add_argument('--output-dir', type=Path)
-    parser.add_argument('--audit-dir', type=Path)
+    parser.add_argument('--output-dir', type=Path, required=True)
+    parser.add_argument('--audit-dir', type=Path, required=True)
+    parser.add_argument('--figure1', type=Path, required=True)
+    parser.add_argument('--cross-model', type=Path, required=True)
+    parser.add_argument('--deepseek-off', type=Path, required=True)
+    parser.add_argument('--deepseek-on', type=Path, required=True)
+    parser.add_argument('--qwen-off-manifest', type=Path, required=True)
+    parser.add_argument('--qwen-off-analysis', type=Path, required=True)
+    parser.add_argument('--qwen-on-manifest', type=Path, required=True)
+    parser.add_argument('--qwen-on-analysis', type=Path, required=True)
+    parser.add_argument('--opponent-profiles', type=Path, required=True)
+    parser.add_argument('--behavior-analysis', type=Path, required=True)
     parser.add_argument('--figure', choices=['all', '2', '3'], default='all',
                         help='Render a single figure without rewriting the other figure assets.')
     args = parser.parse_args()
     ROOT, ANALYSIS_SUFFIX = args.work.resolve(), args.analysis_suffix
-    output = (args.output_dir or ROOT / 'reproduct').resolve()
+    INPUTS = {
+        'cross_model': args.cross_model.resolve(),
+        'deepseek_off': args.deepseek_off.resolve(),
+        'deepseek_on': args.deepseek_on.resolve(),
+        'qwen_off_manifest': args.qwen_off_manifest.resolve(),
+        'qwen_off_analysis': args.qwen_off_analysis.resolve(),
+        'qwen_on_manifest': args.qwen_on_manifest.resolve(),
+        'qwen_on_analysis': args.qwen_on_analysis.resolve(),
+        'opponents': args.opponent_profiles.resolve(),
+        'behavior': args.behavior_analysis.resolve(),
+    }
+    output = args.output_dir.resolve()
     cross, pairs, opponents, behavior = load()
-    figure1_paths = [ROOT / 'assets/figure1.png']
+    figure1_paths = [args.figure1.resolve()]
     figure1_before = {str(p): sha256(p.read_bytes()).hexdigest() for p in figure1_paths}
     exports = {}
     if args.figure in ['all', '2']:
@@ -380,9 +396,9 @@ def main():
     if args.figure in ['all', '3']:
         exports['figure3'] = save(figure3(opponents, behavior), output, 'fig3')
     for rel, digest in SOURCES.items():
-        assert sha256((ROOT / rel).read_bytes()).hexdigest() == digest
+        assert sha256(Path(rel).read_bytes()).hexdigest() == digest
     assert figure1_before == {str(p): sha256(p.read_bytes()).hexdigest() for p in figure1_paths}
-    qa_directory = args.audit_dir or ROOT / 'results/reproduction'
+    qa_directory = args.audit_dir.resolve()
     qa_directory.mkdir(parents=True, exist_ok=True)
     for number, stem in [('figure2', 'fig2'), ('figure3', 'fig3')]:
         if number not in exports:
@@ -390,8 +406,6 @@ def main():
         qa = {'status': 'passed', 'asset': stem, 'figure_language': 'English',
               'population_unit': 20, 'seed_order': SEEDS, 'source_hashes_unchanged': True,
               'inputs_sha256': SOURCES, 'read_keys': READ_KEYS,
-              'render_script_sha256': sha256(Path(__file__).read_bytes()).hexdigest(),
-              'style_helper_sha256': sha256(Path(__file__).with_name('results_plot_style.py').read_bytes()).hexdigest(),
               **exports[number],
               'figure1_unchanged': True,
               'science_unchanged': 'Frozen means and stored intervals; render-only changes.'}

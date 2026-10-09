@@ -14,9 +14,9 @@ from .results_plot_audit import render_audit,WIDTH
 def main():
     W=Path(__file__).resolve().parents[3]
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--input',type=Path,default=W/'results/figure4_opponent_profiles_20260926/ANALYSIS.json')
-    parser.add_argument('--output-dir',type=Path,default=W/'reproduct')
-    parser.add_argument('--audit-dir',type=Path,default=W/'results/reproduction')
+    parser.add_argument('--input',type=Path,required=True)
+    parser.add_argument('--output-dir',type=Path,required=True)
+    parser.add_argument('--audit-dir',type=Path,required=True)
     args=parser.parse_args()
     INPUT=args.input
     os.environ.setdefault('MPLCONFIGDIR',str(W/'.mplconfig'))

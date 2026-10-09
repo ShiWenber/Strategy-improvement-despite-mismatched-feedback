@@ -10,8 +10,8 @@ import os
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
-ROOT = REPO / 'results' / 'feedback_specificity_v2'
-OUT = REPO / 'reproduct'
+ROOT = REPO
+OUT = REPO
 FIGURES = {3: 'figS1', 4: 'figS5', 5: 'figS3'}
 os.environ.setdefault('MPLCONFIGDIR', str(REPO/'.mplconfig'))
 import matplotlib
@@ -35,7 +35,7 @@ WIDTHS = {i: TEXTWIDTH*f for i,f in FRACTIONS.items()}
 
 audits = []
 INPUTS = []
-AUDIT_DIR = REPO/'results/reproduction'
+AUDIT_DIR = REPO
 
 def dot(ax, row, y, color, marker, seeds=False):
     if seeds:
@@ -160,7 +160,9 @@ def make_figure5(role):
     policy_markers = ('o', 's', '^')
     handles = [Line2D([], [], color=color, marker=marker, markersize=4.3, lw=1.2)
                for color, marker in zip(policy_colors, policy_markers)]
-    panel_legend(axes[0],handles,['S1','S2','S3'],ncol=3)
+    legend = panel_legend(axes[0], handles, ['S1', 'S2', 'S3'], ncol=3)
+    legend.set_loc('lower center')
+    legend.set_bbox_to_anchor((.5, .82), transform=axes[0].transAxes)
     panel_legend(axes[1],[Line2D([], [], color='#0072B2', marker='o', linestyle='none', markersize=4.8),
                          Line2D([], [], color='#222222', marker='D', linestyle='none', markersize=4.8)],
                  ['Adjacent difference','Total difference'],ncol=1)
@@ -205,18 +207,20 @@ def main():
     parser.add_argument('--figures', nargs='+', type=int, choices=(3, 4, 5), default=[3, 4, 5])
     parser.add_argument('--work', type=Path, default=REPO)
     parser.add_argument('--analysis-suffix', default='')
-    parser.add_argument('--output-dir', type=Path)
-    parser.add_argument('--audit-dir', type=Path)
+    parser.add_argument('--output-dir', type=Path, required=True)
+    parser.add_argument('--audit-dir', type=Path, required=True)
+    parser.add_argument('--off-analysis', type=Path, required=True)
+    parser.add_argument('--off-role-analysis', type=Path, required=True)
+    parser.add_argument('--on-analysis', type=Path, required=True)
     args = parser.parse_args()
     work = args.work.resolve()
-    OUT = args.output_dir or work / 'reproduct'
+    OUT = args.output_dir.resolve()
     OUT.mkdir(parents=True, exist_ok=True)
-    audit_dir = args.audit_dir or work / 'results/reproduction'
+    audit_dir = args.audit_dir.resolve()
     audit_dir.mkdir(parents=True, exist_ok=True)
-    name = f'ANALYSIS{args.analysis_suffix}.json'
-    data_path = work / 'results/feedback_specificity_v2' / name
-    role_path = work / 'results/feedback_specificity_v2/role_analysis' / name
-    thinking_path = work / 'results/feedback_specificity_thinking_384k_20260923' / name
+    data_path = args.off_analysis.resolve()
+    role_path = args.off_role_analysis.resolve()
+    thinking_path = args.on_analysis.resolve()
     INPUTS = [data_path, role_path, thinking_path]
     AUDIT_DIR = audit_dir
     data, role, thinking_report = [json.loads(p.read_text(encoding='utf-8')) for p in (data_path, role_path, thinking_path)]
