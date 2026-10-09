@@ -3,6 +3,7 @@ import argparse
 from dataclasses import asdict
 import json
 from pathlib import Path
+import shutil
 import threading
 import time
 import traceback
@@ -75,9 +76,19 @@ def receive_stream(stream, sink, progress):
                 finish_reason=finish, response_id=response_id, returned_model=model)
 
 
-def streamed_program(root, job, spec, cfg, require_reasoning):
+def _archive_failed_request(root, path, record):
+    archive = root / 'attempt_history' / f'retry_{time.time_ns()}' / 'requests_candidates'
+    archive.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(path, archive / path.name)
+    path.unlink()
+
+
+def streamed_program(root, job, spec, cfg, require_reasoning, api_retries=3):
     path = root / 'requests_candidates' / (job['id'] + '.json')
-    record = cached_request(path, spec)
+    record = cached_request(path, spec, retry_failed=True)
+    if record is not None and record.get('status') == 'api_error':
+        _archive_failed_request(root, path, record)
+        record = None
     if record is None:
         from openai import OpenAI
         import httpx
@@ -85,39 +96,53 @@ def streamed_program(root, job, spec, cfg, require_reasoning):
         key = get_api_key(spec['provider'])
         if not key:
             raise RuntimeError('Provider not configured')
-        record = begin_request(path, spec)
         events = root / 'streams' / (job['id'] + '.jsonl')
         events.parent.mkdir(exist_ok=True)
+        if events.exists():
+            events.unlink()
 
         def progress(chars):
             write_json(root / 'request_progress' / (job['id'] + '.json'),
                        {'id': job['id'], 'characters_received': chars, 'updated_at': time.time()})
 
-        try:
-            with OpenAI(api_key=key, base_url=get_base_url(spec['provider']), max_retries=0,
-                        timeout=httpx.Timeout(3600, connect=30)) as client:
-                request = {k: v for k, v in spec.items() if k not in ('provider', 'prompt')}
-                request['messages'] = [{'role': 'user', 'content': spec['prompt']}]
+        with OpenAI(api_key=key, base_url=get_base_url(spec['provider']), max_retries=0,
+                    timeout=httpx.Timeout(3600, connect=30)) as client:
+            request = {k: v for k, v in spec.items() if k not in ('provider', 'prompt')}
+            request['messages'] = [{'role': 'user', 'content': spec['prompt']}]
+            for attempt in range(api_retries + 1):
+                record = begin_request(path, spec)
+                if events.exists():
+                    events.unlink()
                 with events.open('x', encoding='utf-8') as sink:
-                    with client.chat.completions.create(**request) as stream:
-                        response = stream.response
-                        record['response_metadata'] = {
-                            'http_status': response.status_code, 'http_version': response.http_version,
-                            'opened_at': time.time(), 'headers': {k: response.headers[k] for k in
-                                ('x-request-id', 'request-id', 'content-type', 'transfer-encoding') if k in response.headers}}
+                    try:
+                        with client.chat.completions.create(**request) as stream:
+                            response = stream.response
+                            record['response_metadata'] = {
+                                'http_status': response.status_code, 'http_version': response.http_version,
+                                'opened_at': time.time(), 'headers': {k: response.headers[k] for k in
+                                    ('x-request-id', 'request-id', 'content-type', 'transfer-encoding') if k in response.headers}}
+                            write_json(path, record)
+                            result = receive_stream(stream, sink, progress)
+                        record.update(result, status='received', finished_at=time.time())
                         write_json(path, record)
-                        result = receive_stream(stream, sink, progress)
-            record.update(result, status='received', finished_at=time.time())
-            write_json(path, record)
-        except Exception as exc:
-            error = {'error_type': type(exc).__name__, 'http_status': getattr(exc, 'status_code', None),
-                     'exception_chain': transport_diagnostics(exc, key)}
-            body = getattr(exc, 'body', None)
-            if isinstance(body, dict) and isinstance(body.get('error'), dict):
-                error['provider_error'] = {k: body['error'].get(k) for k in ('type', 'code', 'message')}
-            record.update(error, status='api_error', finished_at=time.time())
-            write_json(path, record)
-            raise RuntimeError('Request failed; saved metadata for ' + job['id']) from None
+                        break
+                    except Exception as exc:
+                        error = {'error_type': type(exc).__name__, 'http_status': getattr(exc, 'status_code', None),
+                                 'exception_chain': transport_diagnostics(exc, key)}
+                        body = getattr(exc, 'body', None)
+                        if isinstance(body, dict) and isinstance(body.get('error'), dict):
+                            error['provider_error'] = {k: body['error'].get(k) for k in ('type', 'code', 'message')}
+                        record.update(error, status='api_error', finished_at=time.time())
+                        write_json(path, record)
+                        http_status = getattr(exc, 'status_code', None)
+                        retryable = (isinstance(exc, httpx.TransportError)
+                                     or http_status in (408, 409, 429)
+                                     or isinstance(http_status, int) and http_status >= 500)
+                        if not retryable or attempt >= api_retries:
+                            raise RuntimeError('Request failed; saved metadata for ' + job['id']) from None
+                        _archive_failed_request(root, path, record)
+                        if events.exists():
+                            events.unlink()
     if require_reasoning and not record.get('reasoning_content'):
         raise RuntimeError('No native reasoning evidence; stop dispatch and inspect ' + job['id'])
     if record.get('returned_model') != spec['model']:
@@ -176,7 +201,7 @@ def write_arm_logs(root, manifest, arm=None):
     return paths
 
 
-def generate_candidate(root, job, arm, *, provider='deepseek', mode='off'):
+def generate_candidate(root, job, arm, *, provider='deepseek', mode='off', api_retries=3):
     """All models share the same condition parameter, candidate record and log path."""
     if arm not in SCORE_ARMS or job['arm'] != arm:
         raise ValueError('Candidate information condition differs from task')
@@ -197,7 +222,8 @@ def generate_candidate(root, job, arm, *, provider='deepseek', mode='off'):
             generator = Generator(root / 'requests_candidates', provider, spec['model'], cfg.temperature)
             policy = generator.generate(job['id'], spec['prompt'], cfg)
         else:
-            policy = streamed_program(root, job, spec, cfg, require_reasoning=mode == 'on')
+            policy = streamed_program(root, job, spec, cfg, require_reasoning=mode == 'on',
+                                      api_retries=api_retries)
         write_json(out, {**job, 'child': asdict(policy) if policy else None,
                         'parent_key': Policy(**context['parent']).key, 'valid': policy is not None})
         record = read_json(root / 'requests_candidates' / (job['id'] + '.json'))
@@ -208,9 +234,10 @@ def generate_candidate(root, job, arm, *, provider='deepseek', mode='off'):
         append_data_log(root, job)
 
 
-def candidate_job(arg, *, provider='deepseek', mode='off'):
+def candidate_job(arg, *, provider='deepseek', mode='off', api_retries=3):
     root, job = arg
-    return generate_candidate(root, job, job['arm'], provider=provider, mode=mode)
+    return generate_candidate(root, job, job['arm'], provider=provider, mode=mode,
+                              api_retries=api_retries)
 
 
 def jobs_for_arm(root, manifest, arm):

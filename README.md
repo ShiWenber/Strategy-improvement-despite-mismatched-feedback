@@ -16,6 +16,15 @@ uv sync
 
 The analysis and figure/table commands below use recorded responses and cached labels, with **no LLM API calls**. Run them in order from the project root.
 
+## Utility scripts
+
+The canonical convenience entry points now live in `tools/`:
+
+```sh
+bash tools/generate_api.sh [--arms "score accurate mismatched"] [workspace]
+bash tools/plot.sh [--work] WORK_DIRECTORY
+```
+
 ## Paper data and file structure
 
 The data cover DeepSeek and Qwen in OFF/ON configurations, with **Score**, **Accurate** and **Mismatched** in each configuration. Score retains the population code, parent strategy, game rules and genuine cumulative training scores, with an empty behavioural-report block. Accurate versus Mismatched remains the prespecified matching comparison; comparisons with Score are exploratory supplementary evidence.
@@ -31,7 +40,7 @@ Each model/configuration uses the same 20 populations and 60 parents, with two c
 
 The paper names the DeepSeek model deepseek-v4.1-flash; recorded requests use the API identifier `deepseek-flash`. API aliases do not guarantee fixed model weights over time. OFF/ON differ in thinking settings, output budgets and collection times, so configuration differences do not isolate the thinking switch. Qwen is a follow-up model test using the same parents and evaluation panels.
 
-`experiments/direct_reciprocity/` contains all experiment code, including API generation, evaluation, record checks, analyses and figure/table exports. Reproduction runs these same entry points with explicit input and output parameters; `tools/` contains only the optional JSON-to-Markdown reader.
+`experiments/direct_reciprocity/` contains all experiment code, including API generation, evaluation, record checks, analyses and figure/table exports. Reproduction runs these same entry points with explicit input and output parameters; `tools/` contains the workflow convenience scripts (`generate_api.sh`, `plot.sh`) and the optional JSON-to-Markdown reader.
 
 ### Record types
 
@@ -56,6 +65,8 @@ Paths are relative to each experiment directory unless stated otherwise. ON and 
 `--output-suffix _reproduct` appends the suffix to generated filenames beside the paper data; `--analysis-suffix` or `--analysis-file` selects these outputs as downstream inputs. The table maps each command, in order, to its analysis and outputs.
 
 ```sh
+bash tools/generate_api.sh
+
 uv run python -m experiments.direct_reciprocity.specificity_analysis results/feedback_specificity_v2 --output-suffix _reproduct
 uv run python -m experiments.direct_reciprocity.thinking_control_analysis results/feedback_specificity_thinking_384k_20260923 --source results/feedback_specificity_v2 --source-analysis ANALYSIS_reproduct.json --output-suffix _reproduct
 uv run python -m experiments.direct_reciprocity.qwen_analysis --root results/qwen3_8 --source results/feedback_specificity_v2 --output-suffix _reproduct
@@ -66,6 +77,8 @@ uv run python -m experiments.direct_reciprocity.figures.plot_behavior_evidence -
 uv run python -m experiments.direct_reciprocity.mismatch_distance --root . --output-suffix _reproduct
 uv run python -m experiments.direct_reciprocity.cross_model_summary --analysis-suffix _reproduct --output results/model_comparison_20260928/cross_model_mainline_data_reproduct.json --csv-dir results/model_comparison_20260928 --output-suffix _reproduct
 uv run python -m experiments.direct_reciprocity.judge_mismatch_detection_summary report --judgments-dir results/mismatch_detection_jev/judgments --threshold 0.40 --confidence 0.60 --output-json results/mismatch_detection_jev/jev_recount_reproduct.json
+
+bash tools/plot.sh --work .
 ```
 
 | Step / analysis | Inputs and outputs |
@@ -96,15 +109,14 @@ uv run python tools/render_report.py results/feedback_specificity_v2/ANALYSIS_re
 Open the PNG links below; figure PDF/SVG versions share the same stems. `reproduct/` is a flat directory of viewable figures.
 
 The API reproduction plotting entry point keeps every input and output path in
-one shell script. It never falls back to the repository's historical
-`results/` directories:
+one shell script:
 
 ```sh
 # Read the original data under ./results
-bash experiments/direct_reciprocity/plot.sh --work .
+bash tools/plot.sh --work .
 
 # Read the API reproduction data under results/api_reproduct/results
-bash experiments/direct_reciprocity/plot.sh results/api_reproduct
+bash tools/plot.sh --work results/api_reproduct
 ```
 
 | Paper item | Reproduction output | Command / evidence |
@@ -133,14 +145,25 @@ Command numbers refer to the block above. Main Tables I–II define the report c
 Copy `.env.example` to `.env` and configure `DEEPSEEK_API_KEY`, `DEEPSEEK_API_BASE`, `QWEN_API_KEY` and `QWEN_API_BASE`, then run:
 
 ```sh
-sh experiments/direct_reciprocity/generate_api.sh
+bash tools/generate_api.sh
 ```
 
 Every configuration includes **Score, Accurate and Mismatched by default**. These information conditions are frozen experiment hyperparameters, recorded in `manifest.json` under `arms` and shared by DeepSeek OFF/ON and Qwen OFF/ON.
 
+### `specificity.py` versus `paired_control.py`
+
+The two API-generation entry points have different responsibilities:
+
+| Script | Role | Data it creates or reuses |
+| --- | --- | --- |
+| `experiments.direct_reciprocity.specificity` | Builds the primary OFF experiment from scratch | Creates the populations and parent strategies, then generates and evaluates Score/Accurate/Mismatched candidates |
+| `experiments.direct_reciprocity.paired_control` | Runs a paired follow-up for another provider or mode | Reuses the source experiment's populations, parents, prompts and parent selection scores; generates new candidate responses and reruns candidate selection and holdout evaluation |
+
+In `tools/generate_api.sh`, `specificity.py` is run first for DeepSeek OFF. The resulting directory is then passed as `--source` to `paired_control.py` for DeepSeek ON and Qwen OFF/ON. `paired_control.py` therefore does not regenerate initialization responses, populations or parents; its manifest records zero new initialization calls. Its new API calls are for candidate responses, so a failed condition such as `generate_score` can be resumed by rerunning the same `paired_control all` command after inspecting the recorded error.
+
 The run makes **1,680 planned API calls**: 240 initialization calls and 1,440 candidate calls. ON and Qwen reuse the new OFF parents and prompts. The script then runs the analyses and exports JSON, CSV and tables with `_reproduct` summary filenames.
 
-Outputs stay in `results/api_reproduct/`. To collect independent samples, supply an empty workspace, for example `sh experiments/direct_reciprocity/generate_api.sh results/api_reproduct_new`. Re-running the same workspace resumes from recorded responses. New programs and results may differ from the published run.
+Outputs stay in `results/api_reproduct/`. To collect independent samples, supply an empty workspace, for example `bash tools/generate_api.sh results/api_reproduct_new`. Re-running the same workspace resumes from recorded responses. New programs and results may differ from the published run.
 
 Within **each model/configuration**, all **Score** requests finish before **Accurate**, followed by **Mismatched**. `--api-workers` controls concurrency within a condition; an API error prevents later conditions from starting. Parent and draw order is shared across conditions and shuffled within each batch. The manifest records `generation_order`. This fixed condition order differs from the historical randomized collection; historical IDs and collection records remain intact.
 

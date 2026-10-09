@@ -100,12 +100,14 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--source', type=Path, default=SOURCE)
     parser.add_argument('--api-workers', type=int, default=12)
+    parser.add_argument('--api-retries', type=int, default=3,
+                        help='Retries for transport failures and saved api_error records.')
     parser.add_argument('--workers', type=int, default=24)
     parser.add_argument('--env-file', default='.env')
     parser.add_argument('--arm', choices=SCORE_ARMS, help='Generate one condition; earlier condition batches must be complete.')
     args = parser.parse_args()
-    if min(args.workers, args.api_workers) < 1:
-        parser.error('Worker counts must be positive')
+    if min(args.workers, args.api_workers) < 1 or args.api_retries < 0:
+        parser.error('Workers must be positive and api-retries cannot be negative')
     if args.arm is not None and args.stage not in ('first', 'generate'):
         parser.error('--arm belongs to the first or generate stage')
     from dotenv import load_dotenv
@@ -116,7 +118,10 @@ def main():
         print(json.dumps({'prepared': str(root), 'requests': len(manifest['jobs']), 'api': manifest['api']}))
         return
     manifest = verify(root, args.source, args.provider)
-    generate = partial(candidate_job, provider=args.provider, mode=manifest.get('mode', 'on'))
+    generate_kwargs = {'provider': args.provider, 'mode': manifest.get('mode', 'on')}
+    if args.api_retries != 3:
+        generate_kwargs['api_retries'] = args.api_retries
+    generate = partial(candidate_job, **generate_kwargs)
     with runner_lock(root, args.stage):
         if args.stage == 'first':
             arm = args.arm or generation_arms(manifest['arms'])[0]

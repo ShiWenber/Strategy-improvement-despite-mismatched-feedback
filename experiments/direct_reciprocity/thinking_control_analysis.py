@@ -20,7 +20,22 @@ DEFAULT_ROOT = Path('results/feedback_specificity_thinking_384k_20260923')
 def audit(root, m, source=SOURCE):
     root = Path(root)
     issues, records = [], []
-    read_json(root/'COMPLETE.json')
+    complete = root / 'COMPLETE.json'
+    if not complete.exists():
+        status_path = root / 'EXECUTION_STATUS.json'
+        if status_path.exists():
+            status = read_json(status_path)
+            stage = status.get('stage', 'unknown')
+            completed = status.get('completed', '?')
+            total = status.get('total', '?')
+            errors = len(status.get('errors', []))
+            raise RuntimeError(
+                f'Incomplete run at {root}: stage={stage}, '
+                f'completed={completed}/{total}, errors={errors}; '
+                'finish or discard the run before analysis'
+            )
+        raise RuntimeError(f'Incomplete run at {root}: missing COMPLETE.json')
+    read_json(complete)
     selected = seal_selections(root, m, readonly=True)
     if len(selected['rows']) != len(m['jobs']) // m['draws'] * 3:
         issues.append('Sealed selection count differs from manifest')
