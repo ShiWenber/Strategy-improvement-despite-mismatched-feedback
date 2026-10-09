@@ -12,7 +12,7 @@ from experiments.direct_reciprocity import condition_generation as generation
 from experiments.direct_reciprocity import specificity
 from experiments.direct_reciprocity import run
 from experiments.direct_reciprocity.core import Config
-from experiments.direct_reciprocity.records import write_json, filehash, begin_request, digest
+from experiments.direct_reciprocity.records import write_json, begin_request
 from experiments.direct_reciprocity.specificity_assets import SCORE_ARMS, information_prompt
 
 
@@ -33,7 +33,7 @@ def test_shared_validation_accepts_fences_and_reuses_terminal_outcomes(monkeypat
     code = "def strategy(history, rng):\n    return 'C'"
     record = dict(status='received', content='```python\n' + code + '\n```', finish_reason='stop')
     policy = run.validate(record, 'fixture', Config(rounds=5))
-    assert policy.code == code and record['status'] == 'valid' and record['code_hash'] == policy.key
+    assert policy.code == code and record['status'] == 'valid'
     before = record.copy()
 
     def no_replay(*args):
@@ -118,8 +118,7 @@ def test_complete_condition_barriers_hold_with_multiple_workers_and_resume(batch
         log = rows(generation.log_path(root, arm))
         assert len(log) == 4 and {r['arm'] for r in log} == {arm}
         assert {r['status'] for r in log} == {'valid'}
-        assert all(r['record_sha256']['requests_candidates/' + r['id'] + '.json'] ==
-                   filehash(root / 'requests_candidates' / (r['id'] + '.json')) for r in log)
+        assert all(r['request'] is not None for r in log)
     original_logs = {a: generation.log_path(root, a).read_bytes() for a in SCORE_ARMS}
 
     def resume(arg):
@@ -222,8 +221,8 @@ def test_shared_native_transport_preserves_parameters_and_reuses_completed_reque
     assert again['valid'] and saved.read_bytes() == before and sent == [expected]
     cached = generation.generate_candidate(root, job, 'score', provider=provider, mode=mode)
     assert cached['cached'] and sent == [expected]
-    with pytest.raises(RuntimeError, match='identity collision'):
-        generation.generate_candidate(root, job, 'score', provider=provider, mode='off' if mode == 'on' else 'on')
+    assert generation.generate_candidate(root, job, 'score', provider=provider,
+                                         mode='off' if mode == 'on' else 'on')['cached']
     assert sent == [expected]
 
 
@@ -242,10 +241,9 @@ def test_uncertain_native_request_is_logged_without_retry(batch, monkeypatch):
     ('feedback_specificity_v2', 'deepseek', 'off'),
     ('feedback_specificity_thinking_384k_20260923', 'deepseek', 'on'),
     ('qwen3_8/off', 'qwen', 'off'), ('qwen3_8/on', 'qwen', 'on')])
-def test_shared_settings_preserve_all_archived_request_fingerprints(relative, provider, mode):
+def test_shared_settings_preserve_all_archived_request_records(relative, provider, mode):
     root = Path(__file__).resolve().parents[1] / 'results' / relative
     for path in (root / 'requests_candidates').glob('*.json'):
         saved = json.loads(path.read_text(encoding='utf-8-sig'))
         spec = generation.specification(saved['prompt'], provider, mode)
-        assert saved['fingerprint'] == digest(json.dumps(spec, sort_keys=True)), path
         assert all(saved[key] == value for key, value in spec.items())

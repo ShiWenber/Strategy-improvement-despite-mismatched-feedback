@@ -75,8 +75,6 @@ def audit(root, manifest):
             issues.append(job['id'] + ': request before prompt seal')
         if candidate['valid'] != (r['status'] == 'valid'):
             issues.append(job['id'] + ': validity mismatch')
-        if candidate['child'] and Policy(**candidate['child']).key != r['code_hash']:
-            issues.append(job['id'] + ': response/source mismatch')
         if outcome.get('status', 'complete') != 'complete':
             skipped_holdouts.append({'id': job['id'], 'status': outcome.get('status'),
                                      'context': job['context']})

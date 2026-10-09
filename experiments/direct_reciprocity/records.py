@@ -43,7 +43,7 @@ def request_budget(paths, generation=None):
 
 
 def population_root(root, manifest=None):
-    """Read reused initialization in place, with frozen hashes and no copies."""
+    """Read reused initialization in place without issuing a new request."""
     root = Path(root)
     manifest = manifest or read_json(root / 'manifest.json')
     if 'initial_source' not in manifest:

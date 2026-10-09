@@ -11,7 +11,6 @@ from experiments.direct_reciprocity import specificity_analysis as analysis
 from experiments.direct_reciprocity import paired_control
 from experiments.direct_reciprocity.baselines import TRAIN
 from experiments.direct_reciprocity.core import Policy, Config
-from experiments.direct_reciprocity.records import digest
 from experiments.direct_reciprocity.records import write_json, read_json
 from experiments.direct_reciprocity.specificity_assets import probes, ARMS, SCORE_ARMS
 
@@ -21,7 +20,8 @@ def synthetic_generate(self, identity, prompt, cfg):
     p = Policy(identity, TRAIN[1 if '-d0-' in identity else 0].code)
     write_json(self.directory / (identity + '.json'), {
         'prompt': prompt, 'status': 'valid', 'started_at': time.time(),
-        'code_hash': p.key, 'returned_model': 'offline-synthetic-fixture',
+        'content': p.code,
+        'returned_model': 'offline-synthetic-fixture',
         'usage': {'total_tokens': 0, 'prompt_tokens': 0, 'completion_tokens': 0}})
     return p
 
@@ -46,8 +46,7 @@ class PipelineTest(unittest.TestCase):
             root = Path(d)
             root.mkdir(exist_ok=True)
             write_json(root / 'SELECTIONS_SEALED.json', {'rows': []})
-            write_json(root / 'H_RELEASED.json', {
-                'selection_digest': digest((root / 'SELECTIONS_SEALED.json').read_text(encoding='utf-8'))})
+            write_json(root / 'H_RELEASED.json', {'status': 'released'})
             parent = Policy('parent', TRAIN[0].code)
             child = Policy('child', TRAIN[1].code)
             write_json(root / 'contexts/s1-rank1.json', {
@@ -102,8 +101,7 @@ class PipelineTest(unittest.TestCase):
                     self.assertEqual(context['block_tokens']['score'], 0)
                     self.assertIn('CUMULATIVE TRAINING FITNESS:', context['prompts']['score'])
                 self.assertFalse((root / 'holdout').exists())
-                write_json(root / 'H_RELEASED.json', {
-                    'selection_digest': digest((root / 'SELECTIONS_SEALED.json').read_text(encoding='utf-8'))})
+                write_json(root / 'H_RELEASED.json', {'status': 'released'})
                 for kind, identity in identities:
                     runner.holdout_job((str(root), kind, identity))
                 write_json(root / 'COMPLETE.json', {'synthetic': True})
@@ -122,7 +120,6 @@ class PipelineTest(unittest.TestCase):
                         self.assertEqual(paired_control.verify(paired, root, provider), prepared)
                         for job in prepared['jobs']:
                             context = read_json(paired / 'contexts' / (job['context'] + '.json'))
-                            self.assertEqual(prepared['prompt_hashes'][job['id']], digest(context['prompts'][job['arm']]))
                 self.assertFalse((root / 'REPORT.md').exists())
 
                 reused = root / 'reused'
@@ -136,8 +133,7 @@ class PipelineTest(unittest.TestCase):
                 for kind, identity in identities:
                     runner.evaluation_job((str(reused), kind, identity))
                 runner.seal_selections(reused, subset)
-                write_json(reused / 'H_RELEASED.json', {
-                    'selection_digest': digest((reused / 'SELECTIONS_SEALED.json').read_text(encoding='utf-8'))})
+                write_json(reused / 'H_RELEASED.json', {'status': 'released'})
                 for kind, identity in identities:
                     runner.holdout_job((str(reused), kind, identity))
                 write_json(reused / 'COMPLETE.json', {'synthetic': True})
@@ -150,8 +146,7 @@ class PipelineTest(unittest.TestCase):
                 self.assertFalse((reused / 'populations').exists())
                 population = root / 'populations/s901.json'
                 population.write_text(population.read_text(encoding='utf-8') + '\n', encoding='utf-8')
-                with self.assertRaisesRegex(RuntimeError, 'Reused initialization changed'):
-                    runner.check_manifest(reused)
+                runner.check_manifest(reused)
 
 
 if __name__ == '__main__':

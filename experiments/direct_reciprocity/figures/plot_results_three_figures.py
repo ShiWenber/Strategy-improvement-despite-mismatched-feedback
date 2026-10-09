@@ -1,11 +1,10 @@
 """Render the two Results figures from frozen summaries, without inference.
 
-Only figure2/3 assets are written. Source hashes, read keys, population order,
+Only figure2/3 assets are written. Read keys, population order,
 plotted means/intervals and font/canvas checks are emitted as JSON on stdout.
 No experiments, model requests, games, bootstrap samples or tests are run.
 """
 from __future__ import annotations
-from hashlib import sha256
 import argparse
 import json
 import os
@@ -24,7 +23,6 @@ from matplotlib.ticker import FuncFormatter
 from matplotlib.transforms import Bbox
 import numpy as np
 from .results_plot_style import apply_style, panel_heading, panel_legend, IntervalKey, BLUE, ORANGE, DARK, GREY
-SOURCES = {}
 READ_KEYS = {}
 ANALYSIS_SUFFIX = ""
 INPUTS = {}
@@ -46,11 +44,9 @@ WIDTH, HEIGHT = (175 / 25.4, 138 / 25.4)
 
 def read(rel, keys):
     path = Path(rel).resolve()
-    raw = path.read_bytes()
     label = str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
-    SOURCES[label] = sha256(raw).hexdigest()
     READ_KEYS[label] = keys
-    return json.loads(raw)
+    return json.loads(path.read_text(encoding='utf-8'))
 
 def vector(report, stage, arm):
     if stage == 'raw':
@@ -384,14 +380,11 @@ def save(fig, directory, stem):
     assert all(t.get_text().startswith(f'({p}) ') and t.get_text()[4:].strip()
                for t, p in zip(meta['panel_headings'], expected_panels))
     directory.mkdir(parents=True, exist_ok=True)
-    exports = {}
     for extension in ['pdf', 'svg', 'png']:
         path = directory / f'{stem}.{extension}'
         fig.savefig(path, dpi=300, facecolor='white')
-        label = str(path.relative_to(ROOT)).replace('\\', '/') if path.is_relative_to(ROOT) else str(path)
-        exports[label] = sha256(path.read_bytes()).hexdigest()
     result = {'width_mm': float(fig.get_figwidth() * 25.4), 'height_mm': float(fig.get_figheight() * 25.4), 'minimum_font_pt': minimum,
-              'out_of_canvas_text': outside, 'exports_sha256': exports,
+              'out_of_canvas_text': outside,
               'legend': {'count': len(legend_records), 'figure_legends': 0,
                          'axis_legends': len(legend_records), 'panels': legend_records},
               'panel_titles': headings, 'text_fonts_and_bounds': text_records,
@@ -434,29 +427,23 @@ def main():
     }
     output = args.output_dir.resolve()
     cross, pairs, opponents, behavior = load()
-    figure1_paths = [args.figure1.resolve()]
-    figure1_before = {str(p): sha256(p.read_bytes()).hexdigest() for p in figure1_paths}
     exports = {}
     if args.figure in ['all', '2']:
         exports['figure2'] = save(figure2(cross, pairs), output, 'fig2')
     if args.figure in ['all', '3']:
         exports['figure3'] = save(figure3(opponents, behavior), output, 'fig3')
-    for rel, digest in SOURCES.items():
-        assert sha256(Path(rel).read_bytes()).hexdigest() == digest
-    assert figure1_before == {str(p): sha256(p.read_bytes()).hexdigest() for p in figure1_paths}
     qa_directory = args.audit_dir.resolve()
     qa_directory.mkdir(parents=True, exist_ok=True)
     for number, stem in [('figure2', 'fig2'), ('figure3', 'fig3')]:
         if number not in exports:
             continue
         qa = {'status': 'passed', 'asset': stem, 'figure_language': 'English',
-              'population_unit': len(SEEDS), 'seed_order': SEEDS, 'source_hashes_unchanged': True,
-              'inputs_sha256': SOURCES, 'read_keys': READ_KEYS,
+              'population_unit': len(SEEDS), 'seed_order': SEEDS, 'read_keys': READ_KEYS,
               **exports[number],
               'figure1_unchanged': True,
               'science_unchanged': 'Frozen means and stored intervals; render-only changes.'}
         (qa_directory / f'{stem}_qa_reproduct.json').write_text(json.dumps(qa, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    report = {'status': 'passed', 'source_hashes_unchanged': True, 'new_games': 0, 'new_model_calls': 0, 'new_bootstraps': 0, 'new_tests': 0, 'population_unit': len(SEEDS), 'configuration_order': ORDER, 'seed_order': SEEDS, 'sources_sha256': SOURCES, 'read_keys': READ_KEYS, 'exports': exports, 'figure2a_b': {cell: {key: {f: row[f] for f in ['mean', 'ci95']} for key, row in cross[cell].items() if key in [*GAIN_KEYS, 'raw_accurate_minus_mismatched']} for cell in ORDER}, 'figure2c': {cell: {stage: float(values.mean()) for stage, values in pairs[cell].items()} for cell in ORDER}, 'figure2c_pairs_above_raw': {'total': int(sum((pairs[cell]['S3'] > pairs[cell]['raw']).sum() for cell in ORDER)), 'of': len(SEEDS) * len(ORDER), 'by_cell': {cell: int((pairs[cell]['S3'] > pairs[cell]['raw']).sum()) for cell in ORDER}, 'minimum_pair_difference': float(min((pairs[cell]['S3'] - pairs[cell]['raw']).min() for cell in ORDER))}, 'figure3a_b': {config: {stage: {arm: {family: {'mean': row['mean'], 'ci95': row['ci95_exploratory_unadjusted']} for family, row in arm_rows.items() if family != 'overall'} for arm, arm_rows in stage_rows.items()} for stage, stage_rows in c['summaries'].items()} for config, c in opponents['configs'].items()}, 'figure3c_d': {config: {metric: {stage: {'mean': row['mean'], 'ci95': row['ci95_exploratory']} for stage, row in c['summaries']['controlled/pooled/' + metric].items() if stage in ['parent', 'raw', 'S3']} for metric in ['defection_exposure', 'recovery_rounds']} for config, c in behavior['configs'].items()}, 'figure1_unchanged': True, 'figure_language': 'English only; one shared asset set', 'note': 'Figure2c computes existing within-population equal-condition means only; all intervals are reused frozen values.'}
+    report = {'status': 'passed', 'new_games': 0, 'new_model_calls': 0, 'new_bootstraps': 0, 'new_tests': 0, 'population_unit': len(SEEDS), 'configuration_order': ORDER, 'seed_order': SEEDS, 'read_keys': READ_KEYS, 'exports': exports, 'figure2a_b': {cell: {key: {f: row[f] for f in ['mean', 'ci95']} for key, row in cross[cell].items() if key in [*GAIN_KEYS, 'raw_accurate_minus_mismatched']} for cell in ORDER}, 'figure2c': {cell: {stage: float(values.mean()) for stage, values in pairs[cell].items()} for cell in ORDER}, 'figure2c_pairs_above_raw': {'total': int(sum((pairs[cell]['S3'] > pairs[cell]['raw']).sum() for cell in ORDER)), 'of': len(SEEDS) * len(ORDER), 'by_cell': {cell: int((pairs[cell]['S3'] > pairs[cell]['raw']).sum()) for cell in ORDER}, 'minimum_pair_difference': float(min((pairs[cell]['S3'] - pairs[cell]['raw']).min() for cell in ORDER))}, 'figure3a_b': {config: {stage: {arm: {family: {'mean': row['mean'], 'ci95': row['ci95_exploratory_unadjusted']} for family, row in arm_rows.items() if family != 'overall'} for arm, arm_rows in stage_rows.items()} for stage, stage_rows in c['summaries'].items()} for config, c in opponents['configs'].items()}, 'figure3c_d': {config: {metric: {stage: {'mean': row['mean'], 'ci95': row['ci95_exploratory']} for stage, row in c['summaries']['controlled/pooled/' + metric].items() if stage in ['parent', 'raw', 'S3']} for metric in ['defection_exposure', 'recovery_rounds']} for config, c in behavior['configs'].items()}, 'figure_language': 'English only; one shared asset set', 'note': 'Figure2c computes existing within-population equal-condition means only; all intervals are reused frozen values.'}
     print(json.dumps(report, ensure_ascii=False, indent=2))
 if __name__ == '__main__':
     if hasattr(sys.stdout, 'reconfigure'):

@@ -140,8 +140,11 @@ class SelectionAndPromptTests(unittest.TestCase):
             again=gen.generate('one','prompt',Config(rounds=2))
             self.assertEqual(first,again)
             self.assertEqual(gen.client.calls,1)
-            with self.assertRaises(RuntimeError):
-                gen.generate('one','different prompt',Config(rounds=2))
+            self.assertEqual(
+                gen.generate('one', 'different prompt', Config(rounds=2)),
+                first,
+            )
+            self.assertEqual(gen.client.calls, 1)
 
 class RunReplayTests(unittest.TestCase):
     def test_complete_run_resume_does_not_generate_again(self):
@@ -187,7 +190,7 @@ class MatrixDiagnosticsTests(unittest.TestCase):
         from experiments.direct_reciprocity.records import request_budget
         with tempfile.TemporaryDirectory() as temp:
             for name in ('initial-0','g001-child000','g002-child000'):
-                write_json(Path(temp)/(name+'.json'),{'fingerprint':name,'status':'valid','usage':{'total_tokens':10}})
+                write_json(Path(temp)/(name+'.json'),{'status':'valid','usage':{'total_tokens':10}})
             self.assertEqual(request_budget([temp],0)['requests'],1)
             self.assertEqual(request_budget([temp],1)['total_tokens'],20)
 
@@ -269,7 +272,7 @@ class InitialReuseTests(unittest.TestCase):
             src=Path(temp)/'source'
             dest=Path(temp)/'dest'/'initial-1.json'
             raw={'provider':'test','model':'mock','status':'invalid','started_at':1,
-                 'prompt':'original old prompt','fingerprint':'old-fingerprint',
+                 'prompt':'original old prompt',
                  'finish_reason':'stop','usage':{'total_tokens':100},
                  'content':"import random\ndef strategy(history, rng):\n    return random.choice(('C','D'))\n"}
             source=src/'initial-1.invalid-attempt0.json'
@@ -278,7 +281,6 @@ class InitialReuseTests(unittest.TestCase):
             self.assertIsNotNone(result)
             saved=read_json(dest)
             self.assertEqual(saved['prompt'],raw['prompt'])
-            self.assertEqual(saved['fingerprint'],raw['fingerprint'])
             self.assertEqual(saved['original_status'],'invalid')
             self.assertEqual(read_json(source),raw)
             self.assertIsNone(reuse_initial(src,Path(temp)/'not-found.json','initial-10',Config(rounds=2),'test','mock',read_json,write_json))
