@@ -102,9 +102,15 @@ def run(root, analysis_file="ANALYSIS.json", output_suffix=""):
             for setting in ('default', 'noise01', 'long'):
                 rows = [r for r in records if (r['arm'] in ARMS if arm == 'pooled' else r['arm'] == arm)
                         and r['rule'] == rule and r['setting'] == setting]
-                result = {metric: summarize([np.mean([r[metric] for r in rows if r['seed'] == seed])
-                                             for seed in seeds if any(r['seed'] == seed for r in rows)])
-                          for metric in metrics}
+                result = {}
+                for metric in metrics:
+                    values = []
+                    for seed in seeds:
+                        seed_rows = [r for r in rows if r['seed'] == seed
+                                     and (metric != 'B' or r['winner'] is not None)]
+                        values.append(np.mean([r[metric] for r in seed_rows])
+                                      if seed_rows else 0.0)
+                    result[metric] = summarize(values)
                 if arm != 'pooled':
                     if counts[arm]['skipped_pools'] == 0:
                         assert np.allclose(result['R']['seed_values'], frozen['raw'][arm]['metrics'][setting+'/score']['seed_values'], atol=1e-12, rtol=0)

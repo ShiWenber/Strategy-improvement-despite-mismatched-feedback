@@ -49,7 +49,6 @@ Paths are relative to each experiment directory unless stated otherwise. ON and 
 | `SELECTIONS_SEALED.json` | 540 sealed decisions selecting a candidate or retaining the parent |
 | `holdout/<id>.json` | Payoff and independent behaviour measurements and gains over parents |
 | `ANALYSIS.json`, `AUDIT.json` | Reference analysis summaries |
-| `SCORE_RESTORE.json` | Source archive identity and byte hashes of Score records; bound to the manifest |
 | `arm_logs/score.jsonl`, `arm_logs/accurate.jsonl`, `arm_logs/mismatched.jsonl` | One consolidated data log per condition and model/configuration: task identity, complete request/response, usage, candidate validity, selection scores, holdout data and original record hashes |
 
 ## Reproduce each analysis
@@ -96,13 +95,16 @@ uv run python tools/render_report.py results/feedback_specificity_v2/ANALYSIS_re
 
 Open the PNG links below; figure PDF/SVG versions share the same stems. `reproduct/` is a flat directory of viewable figures.
 
+The API reproduction plotting entry point keeps every input and output path in
+one shell script. It never falls back to the repository's historical
+`results/` directories:
+
 ```sh
-uv run python -m experiments.direct_reciprocity.figures.plot_results_three_figures --analysis-suffix _reproduct --output-dir reproduct
-uv run python -m experiments.direct_reciprocity.figures.plot_camera_ready --analysis-suffix _reproduct --figures 3 4 5 --output-dir reproduct
-uv run python -m experiments.direct_reciprocity.figures.build_interface_figures --input results/reciprocity_population_visuals_20260924/population_summary_reproduct.json --display-output results/figure_rendering/frozen_generation_display_reproduct.json --output-dir reproduct
-uv run python -m experiments.direct_reciprocity.figures.plot_opponent_profiles --input results/figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json --output-dir reproduct
-uv run python -m experiments.direct_reciprocity.figures.plot_mismatch_distance --inputs docs/direct_reciprocity/mismatch_distance/mismatch_distance_thinking_off_reproduct.json docs/direct_reciprocity/mismatch_distance/mismatch_distance_thinking_on_reproduct.json --output-dir reproduct
-uv run python -m experiments.direct_reciprocity.export_paper_tables --work . --analysis-suffix _reproduct --output results/reproduction/tables --output-suffix _reproduct
+# Read the original data under ./results
+bash experiments/direct_reciprocity/plot.sh --work .
+
+# Read the API reproduction data under results/api_reproduct/results
+bash experiments/direct_reciprocity/plot.sh results/api_reproduct
 ```
 
 | Paper item | Reproduction output | Command / evidence |

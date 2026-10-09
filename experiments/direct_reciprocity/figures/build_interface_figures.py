@@ -16,8 +16,8 @@ from .results_plot_style import apply_style,panel_title,panel_legend,BLUE,ORANGE
 from .results_plot_audit import render_audit,WIDTH
 apply_style()
 MODES=('Thinking OFF','Thinking ON');COLORS=(BLUE,ORANGE)
-POP=ROOT/'results/reciprocity_population_visuals_20260924/population_summary.json'
-DISP=ROOT/'results/figure_rendering/frozen_generation_display.json'
+POP = None
+DISP = None
 
 def vector(report,stage,arm):
  row=report['raw'][arm]['metrics']['default/score'] if stage=='Raw' else report['selected']['S3/'+arm]['metrics']['default']
@@ -56,10 +56,10 @@ def generation_figure(populations,display,args):
 def main():
  from scipy.stats import gaussian_kde
  parser=argparse.ArgumentParser(description=__doc__)
- parser.add_argument('--input',type=Path,default=POP)
- parser.add_argument('--display-output',type=Path,default=DISP)
- parser.add_argument('--output-dir',type=Path,default=ROOT/'reproduct')
- parser.add_argument('--audit-dir',type=Path,default=ROOT/'results/reproduction')
+ parser.add_argument('--input',type=Path,required=True)
+ parser.add_argument('--display-output',type=Path,required=True)
+ parser.add_argument('--output-dir',type=Path,required=True)
+ parser.add_argument('--audit-dir',type=Path,required=True)
  parser.add_argument('--reuse-display',action='store_true',help='Use frozen histogram and KDE coordinates without fitting or rewriting the display cache.')
  args=parser.parse_args()
  cache=read_json(args.input);pop={m:cache['configurations'][k] for m,k in zip(MODES,('Off / 6k','On / 384k'))}

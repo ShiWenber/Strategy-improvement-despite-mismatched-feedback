@@ -15,10 +15,6 @@ from statistics import mean
 REPO = Path(__file__).resolve().parents[3]
 import numpy as np
 
-ROOTS = {
-    'non_thinking': 'results/feedback_specificity_v2',
-    'thinking': 'results/feedback_specificity_thinking_384k_20260923',
-}
 LABELS = {'non_thinking': 'Thinking OFF', 'thinking': 'Thinking ON'}
 ARMS = ('accurate', 'mismatched')
 SEEDS = list(range(200, 220))
@@ -137,12 +133,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--work', type=Path, default=REPO)
     parser.add_argument('--analysis-suffix', default='')
-    parser.add_argument('--output', type=Path)
+    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--off-root', type=Path, required=True)
+    parser.add_argument('--on-root', type=Path, required=True)
     args = parser.parse_args()
     REPO = args.work.resolve()
-    output = args.output or REPO / 'results/reciprocity_population_visuals_20260924/behavior/ANALYSIS.json'
+    output = args.output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    data = {config: analyze(config, REPO / root, args.analysis_suffix) for config, root in ROOTS.items()}
+    data = {
+        'non_thinking': analyze('non_thinking', args.off_root.resolve(), args.analysis_suffix),
+        'thinking': analyze('thinking', args.on_root.resolve(), args.analysis_suffix),
+    }
     for mode in ('controlled', 'natural'):
         for metric in METRICS:
             key = f'{mode}/pooled/{metric}'
