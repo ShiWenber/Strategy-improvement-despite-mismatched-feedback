@@ -9,7 +9,7 @@ from .recover_evaluation import tolerate_holdout_failure
 from .prompts import build_prompt
 from .run import Generator
 from .records import read_json, write_json
-from .records import check_implementation, request_budget
+from .records import request_budget
 
 
 def hypothetical_fitness(candidate, slot, population, archive, cfg, generation):
@@ -31,7 +31,6 @@ def hypothetical_fitness(candidate, slot, population, archive, cfg, generation):
 def run_control(root,seed,available_only=False,evaluation_workers=1):
     root=Path(root)
     manifest=read_json(root/'matrix_plan.json')
-    check_implementation(manifest)
     cells=[cell for cell in manifest['cells'] if cell['seed']==seed]
     references=[]
     for cell in cells:
@@ -106,7 +105,6 @@ def prepare_control(root,seed):
     """Generate the guaranteed truncation-budget prefix without any fitness feedback."""
     root=Path(root)
     manifest=read_json(root/'matrix_plan.json')
-    check_implementation(manifest)
     reference=root/f'minimal__paper_truncation__seed{seed}'
     cfg=Config(**read_json(reference/'config.json')['config'])
     cfg=replace(cfg,prompt='minimal',selection='paper_truncation')

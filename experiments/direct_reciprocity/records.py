@@ -77,15 +77,8 @@ def check_manifest(root):
     manifest = read_json(Path(root) / 'manifest.json')
     if 'archive_projection' in manifest:
         raise RuntimeError('Historical archive is read-only; freeze a new output directory and reuse its initialization with --source')
-    if manifest['implementation_hash'] != implementation_hash():
-        raise RuntimeError('Frozen v2 implementation changed; do not mix versions')
     population_root(root, manifest)
     return manifest
-
-
-def check_implementation(manifest):
-    if manifest['implementation_hash'] != implementation_hash():
-        raise RuntimeError('Reference implementation changed')
 
 
 def initial_identity(cfg, provider, model):

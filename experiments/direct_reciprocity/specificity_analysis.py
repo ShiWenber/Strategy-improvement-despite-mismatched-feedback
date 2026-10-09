@@ -53,6 +53,7 @@ def audit(root, manifest):
     root = Path(root)
     verify_restoration(root)
     issues, records = [], []
+    skipped_holdouts = []
     populations = population_root(root, manifest)
     initial_frozen_at = read_json(populations / 'manifest.json')['frozen_at']
     prompt_seal = read_json(root / 'PROMPTS_SEALED.json')
@@ -81,6 +82,13 @@ def audit(root, manifest):
             issues.append(job['id'] + ': validity mismatch')
         if candidate['child'] and Policy(**candidate['child']).key != r['code_hash']:
             issues.append(job['id'] + ': response/source mismatch')
+        if outcome.get('status', 'complete') != 'complete':
+            skipped_holdouts.append({'id': job['id'], 'status': outcome.get('status'),
+                                     'context': job['context']})
+            continue
+        if parent.get('status', 'complete') != 'complete':
+            issues.append(job['id'] + ': complete child has incomplete parent holdout')
+            continue
         for setting in ('default', 'noise01', 'long'):
             for metric in ('score', 'cooperation', 'worst_score'):
                 delta = outcome['deployed'][setting][metric] - parent['measured'][setting][metric]
@@ -108,6 +116,7 @@ def audit(root, manifest):
             'prompt_tokens': sum((r.get('usage') or {}).get('prompt_tokens', 0) for r in records),
             'completion_tokens': sum((r.get('usage') or {}).get('completion_tokens', 0) for r in records),
             'effective_mismatch_contexts': prompt_seal['effective_mismatch_contexts'],
+            'skipped_holdouts': skipped_holdouts,
             'note': 'Record/hash/arithmetic audit, not an independent replay of every game.'}
     if 'initial_source' in manifest:
         new_records = records[len(manifest['init_jobs']):]
@@ -142,27 +151,37 @@ def analyze(root, output_suffix=""):
     write_json(root / f'AUDIT{output_suffix}.json', audit_result)
     if audit_result['issues']:
         raise RuntimeError('Audit failed; do not interpret incomplete or inconsistent results')
-    rows = [read_json(root / 'holdout' / (j['id'] + '.json')) for j in manifest['jobs']]
+    all_rows = [read_json(root / 'holdout' / (j['id'] + '.json')) for j in manifest['jobs']]
+    rows = [r for r in all_rows if r.get('status', 'complete') == 'complete']
     by_id = {r['id']: r for r in rows}
-    parents = {cid: read_json(root / 'holdout' / (cid + '.json')) for cid in {r['context'] for r in rows}}
+    all_parents = {cid: read_json(root / 'holdout' / (cid + '.json'))
+                   for cid in {r['context'] for r in all_rows}}
+    parents = {cid: r for cid, r in all_parents.items()
+               if r.get('status', 'complete') == 'complete'}
     selected = read_json(root / 'SELECTIONS_SEALED.json')['rows']
     selection_scores = {identity: read_json(root / 'selection_scores' / (identity + '.json'))
                         for identity in list(by_id) + list(parents)}
     for row in rows:
-        row['behavior_delta'] = behavior_delta(row, parents[row['context']])
+        if row['context'] in parents:
+            row['behavior_delta'] = behavior_delta(row, parents[row['context']])
     raw, chosen = {}, {}
     for arm in experiment_arms(manifest['arms']):
         arm_rows = [r for r in rows if r['arm'] == arm]
         metrics = {}
         for setting in ('default', 'noise01', 'long'):
             for metric in ('score', 'cooperation', 'worst_score'):
-                values = [mean(r['delta'][setting][metric] for r in arm_rows if r['seed'] == seed) for seed in seeds]
+                values = [mean(r['delta'][setting][metric] for r in arm_rows if r['seed'] == seed)
+                          for seed in seeds if any(r['seed'] == seed for r in arm_rows)]
                 metrics[setting + '/' + metric] = summarize(values)
             for family in ('recovery', 'exploitation', 'random', 'memory'):
                 values = [mean(r['deployed'][setting]['families'][family] - parents[r['context']]['measured'][setting]['families'][family]
-                               for r in arm_rows if r['seed'] == seed) for seed in seeds]
+                               for r in arm_rows if r['seed'] == seed and r['context'] in parents)
+                          for seed in seeds if any(r['seed'] == seed and r['context'] in parents for r in arm_rows)]
                 metrics[setting + '/family:' + family] = summarize(values)
-        behavior = {metric: summarize([mean(r['behavior_delta'][metric] for r in arm_rows if r['seed'] == seed) for seed in seeds])
+        behavior = {metric: summarize([mean(r['behavior_delta'][metric] for r in arm_rows
+                                             if r['seed'] == seed and 'behavior_delta' in r)
+                                       for seed in seeds
+                                       if any(r['seed'] == seed and 'behavior_delta' in r for r in arm_rows)])
                     for metric in arm_rows[0]['behavior_delta']}
         for rule in ('S1', 'S2', 'S3'):
             values = []
@@ -186,11 +205,18 @@ def analyze(root, output_suffix=""):
             winners = [r for r in selected if r['arm'] == arm and r['rule'] == rule]
             sm = {}
             for setting in ('default', 'noise01', 'long'):
-                values = [mean(by_id[r['winner']]['delta'][setting]['score'] if r['winner'] else 0.
-                               for r in winners if r['seed'] == seed) for seed in seeds]
+                values = []
+                for seed in seeds:
+                    available = [by_id[r['winner']]['delta'][setting]['score']
+                                 for r in winners
+                                 if r['seed'] == seed and r['winner'] in by_id]
+                    values.append(mean(available) if available else 0.)
                 sm[setting] = summarize(values)
-            chosen[rule + '/' + arm] = {'accepted': sum(r['accepted'] for r in winners), 'n': len(winners), 'metrics': sm,
-                                       'accepted_default_degrades': sum(r['winner'] is not None and by_id[r['winner']]['delta']['default']['score'] < 0 for r in winners)}
+            chosen[rule + '/' + arm] = {
+                'accepted': sum(r['accepted'] for r in winners), 'n': len(winners), 'metrics': sm,
+                'accepted_default_degrades': sum(
+                    r['winner'] in by_id and by_id[r['winner']]['delta']['default']['score'] < 0
+                    for r in winners)}
     def raw_values(arm):
         return np.array(raw[arm]['metrics']['default/score']['seed_values'])
     def selected_values(rule, arm):
@@ -207,6 +233,8 @@ def analyze(root, output_suffix=""):
         vulnerability = f['sustained_D']['mean']['unilateral_cooperation_last5']
         accurate = [r for r in rows if r['context'] == cid and r['arm'] == 'accurate']
         mismatch = [r for r in rows if r['context'] == cid and r['arm'] == 'mismatched']
+        if not accurate or not mismatch:
+            continue
         associations.append({'context': cid, 'seed': seed, 'recovery_deficit': deficit,
                              'exploitation_vulnerability': vulnerability,
                              'accurate_minus_mismatched_default': mean(r['delta']['default']['score'] for r in accurate) - mean(r['delta']['default']['score'] for r in mismatch)})
