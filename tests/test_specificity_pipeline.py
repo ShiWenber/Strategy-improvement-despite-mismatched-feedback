@@ -41,6 +41,31 @@ def synthetic_holdout(candidate, cfg):
 
 
 class PipelineTest(unittest.TestCase):
+    def test_failed_parent_is_recorded_and_children_are_skipped(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            root.mkdir(exist_ok=True)
+            write_json(root / 'SELECTIONS_SEALED.json', {'rows': []})
+            write_json(root / 'H_RELEASED.json', {
+                'selection_digest': digest((root / 'SELECTIONS_SEALED.json').read_text(encoding='utf-8'))})
+            parent = Policy('parent', TRAIN[0].code)
+            child = Policy('child', TRAIN[1].code)
+            write_json(root / 'contexts/s1-rank1.json', {
+                'seed': 1, 'parent': asdict(parent)})
+            write_json(root / 'candidates/c1.json', {
+                'id': 'c1', 'context': 's1-rank1', 'child': asdict(child)})
+
+            failed = {s: {'status': 'failed', 'error_type': 'PolicyError'}
+                      for s in ('default', 'noise01', 'long', 'behavior')}
+            with patch.object(runner, 'holdout_measure', return_value=failed):
+                parent_result = runner.holdout_job((str(root), 'parent', 's1-rank1'))
+                child_result = runner.holdout_job((str(root), 'child', 'c1'))
+
+            self.assertEqual(parent_result['status'], 'runtime_failure')
+            self.assertEqual(child_result['skipped'], True)
+            self.assertEqual(read_json(root / 'holdout/s1-rank1.json')['status'], 'runtime_failure')
+            self.assertEqual(read_json(root / 'holdout/c1.json')['status'], 'skipped')
+
     def test_frozen_flow_selects_without_holdout_and_audits(self):
         self.exercise_flow(ARMS)
 
