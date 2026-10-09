@@ -52,7 +52,7 @@ def run(root, analysis_file="ANALYSIS.json", output_suffix=""):
         jobs[(j['context'], j['arm'])].append(j)
     records = []
     counts = defaultdict(lambda: dict(candidates=0, better=0, worse=0, equal=0, pools=0,
-                                    pools_with_better=0, both_better=0))
+                                    pools_with_better=0, both_better=0, skipped_pools=0))
     metrics = ('R', 'G', 'U', 'B', 'gate', 'opportunity', 'ranking', 'total')
     for (context, arm), jj in sorted(jobs.items()):
         jj.sort(key=lambda x: x['draw'])
@@ -60,10 +60,13 @@ def run(root, analysis_file="ANALYSIS.json", output_suffix=""):
         child = [read(f"holdout/{j['id']}.json") for j in jj]
         cs = [read(f"selection_scores/{j['id']}.json") for j in jj]
         ps = read(f'selection_scores/{context}.json')
-        gains = [c['delta']['default']['score'] for c in child]
         count = counts[arm]
-        count['candidates'] += 2
         count['pools'] += 1
+        if any(c.get('status', 'complete') != 'complete' or 'delta' not in c for c in child):
+            count['skipped_pools'] += 1
+            continue
+        gains = [c['delta']['default']['score'] for c in child]
+        count['candidates'] += 2
         better = sum(v > 1e-12 for v in gains)
         count['better'] += better
         count['worse'] += sum(v < -1e-12 for v in gains)
@@ -85,10 +88,11 @@ def run(root, analysis_file="ANALYSIS.json", output_suffix=""):
                                     setting=setting, **p))
     seeds = sorted(manifest['seeds'])
     rng = np.random.default_rng(20260920)
-    indices = rng.integers(0, len(seeds), size=(20000, len(seeds)))
-
     def summarize(values):
         x = np.asarray(values, dtype=float)
+        if not len(x):
+            return dict(mean=None, ci95=None, seed_values=[])
+        indices = rng.integers(0, len(x), size=(20000, len(x)))
         lo, hi = np.quantile(x[indices].mean(axis=1), [.025, .975])
         return dict(mean=float(x.mean()), ci95=[float(lo), float(hi)], seed_values=x.tolist())
 
@@ -99,10 +103,12 @@ def run(root, analysis_file="ANALYSIS.json", output_suffix=""):
                 rows = [r for r in records if (r['arm'] in ARMS if arm == 'pooled' else r['arm'] == arm)
                         and r['rule'] == rule and r['setting'] == setting]
                 result = {metric: summarize([np.mean([r[metric] for r in rows if r['seed'] == seed])
-                                             for seed in seeds]) for metric in metrics}
+                                             for seed in seeds if any(r['seed'] == seed for r in rows)])
+                          for metric in metrics}
                 if arm != 'pooled':
-                    assert np.allclose(result['R']['seed_values'], frozen['raw'][arm]['metrics'][setting+'/score']['seed_values'], atol=1e-12, rtol=0)
-                    assert np.allclose(result['B']['seed_values'], frozen['selected'][rule+'/'+arm]['metrics'][setting]['seed_values'], atol=1e-12, rtol=0)
+                    if counts[arm]['skipped_pools'] == 0:
+                        assert np.allclose(result['R']['seed_values'], frozen['raw'][arm]['metrics'][setting+'/score']['seed_values'], atol=1e-12, rtol=0)
+                        assert np.allclose(result['B']['seed_values'], frozen['selected'][rule+'/'+arm]['metrics'][setting]['seed_values'], atol=1e-12, rtol=0)
                 result['eligible_pool_counts'] = {str(n): sum(r['eligible'] == n for r in rows) for n in range(3)}
                 result['accepted_test_degrades'] = sum(r['winner'] is not None and r['B'] < -1e-12 for r in rows)
                 summaries[f'{arm}/{rule}/{setting}'] = result

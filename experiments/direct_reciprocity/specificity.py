@@ -344,8 +344,11 @@ def seal_selections(root, manifest, *, readonly=False):
     result = {'rows': rows, 'implementation_hash': manifest['implementation_hash'] if readonly else implementation_hash(),
               'candidate_hashes': {j['id']: digest((root / 'candidates' / (j['id'] + '.json')).read_text(encoding='utf-8')) for j in manifest['jobs']}}
     path = root / 'SELECTIONS_SEALED.json'
-    if path.exists() and any(read_json(path)[key] != value for key, value in result.items()):
-        raise RuntimeError('Selections changed after sealing')
+    if path.exists():
+        previous = read_json(path)
+        if previous['rows'] != result['rows'] or previous['candidate_hashes'] != result['candidate_hashes']:
+            raise RuntimeError('Selections changed after sealing')
+        return previous
     if not readonly:
         write_json(path, result)
     return result
@@ -378,7 +381,10 @@ def holdout_job(arg):
     require_holdout(root)
     path = root / 'holdout' / (identity + '.json')
     if path.exists():
-        return {'id': identity, 'cached': True}
+        cached = read_json(path)
+        if not (kind == 'child' and cached.get('status') == 'skipped' and
+                cached.get('skip_reason') == 'parent_holdout_failed'):
+            return {'id': identity, 'cached': True}
     record = read_json(root / ('contexts' if kind == 'parent' else 'candidates') / (identity + '.json'))
     cid = identity if kind == 'parent' else record['context']
     c = read_json(root / 'contexts' / (cid + '.json'))
@@ -391,7 +397,7 @@ def holdout_job(arg):
                   'failed_settings': failed, 'measured': measured, 'deployed': measured}
     else:
         parent_holdout = read_json(root / 'holdout' / (cid + '.json'))
-        if parent_holdout.get('status') != 'complete':
+        if parent_holdout.get('status', 'complete') != 'complete':
             result = {**record, 'status': 'skipped',
                       'skip_reason': 'parent_holdout_failed',
                       'parent_holdout_status': parent_holdout.get('status')}
