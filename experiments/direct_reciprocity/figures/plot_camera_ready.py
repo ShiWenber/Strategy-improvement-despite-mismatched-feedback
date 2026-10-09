@@ -3,7 +3,6 @@
 No new analysis, model requests, or games. Writes figures to reproduct and
 a font/bounds report to results/reproduction; Figure 1 is untouched.
 """
-from hashlib import sha256
 import argparse
 import json
 import os
@@ -230,9 +229,6 @@ def main():
     for index in args.figures:
         makers[index]()
     provenance = {
-        'input_sha256': {str(p.relative_to(work)): sha256(p.read_bytes()).hexdigest()
-                         for p in (data_path, role_path, thinking_path)},
-        'script_sha256': sha256(Path(__file__).read_bytes()).hexdigest(),
         'textwidth_inches': TEXTWIDTH, 'figures': audits,
         'data_changes': False, 'new_analysis': False, 'new_model_calls': 0, 'new_games': 0,
         'note': 'Stored means and intervals rendered unchanged; only selected output targets are written.'}

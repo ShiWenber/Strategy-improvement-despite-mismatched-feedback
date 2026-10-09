@@ -5,7 +5,6 @@ Population panels average draws, parents and arms within the SAME 20 seed cluste
 This is an exploratory visualization, not an extra family of significance tests.
 """
 from pathlib import Path
-from hashlib import sha256
 import argparse
 import json
 
@@ -18,10 +17,7 @@ RUNS = {'Off / 6k': 'feedback_specificity_v2',
 ARMS = ('accurate', 'mismatched')
 SEEDS = list(range(200, 220))
 COLORS = ['#0072B2', '#D55E00']
-sources = {}
-
 def read(path):
-    sources[str(path.relative_to(ROOT)).replace('\\', '/')] = sha256(path.read_bytes()).hexdigest()
     return json.loads(path.read_text(encoding='utf-8'))
 
 def count_quality(rows):
@@ -81,7 +77,7 @@ def main():
             expected = np.mean([check[key][a if key=='raw' else 'S3/'+a]['metrics'][metric]['seed_values'] for a in ARMS],axis=0)
             assert np.allclose(data[label][output], expected, atol=1e-12, rtol=0)
 
-    report = {'configurations': data, 'new_games': 0, 'new_model_calls': 0, 'sources_sha256': sources}
+    report = {'configurations': data, 'new_games': 0, 'new_model_calls': 0}
     destination.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     print('Recomputed distributions and decisions for 480 candidates')
 

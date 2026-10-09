@@ -1,6 +1,5 @@
 """Post-hoc exact policy contrasts on sealed candidate pools; no API or game calls."""
 import argparse
-from .records import filehash
 from .specificity_assets import ARMS
 import json
 from collections import defaultdict
@@ -37,11 +36,8 @@ def self_test():
 def run(root, analysis_file="ANALYSIS.json", output_suffix=""):
     self_test()
     root = Path(root)
-    hashes = {}
-
     def read(name):
         raw = (root/name).read_bytes()
-        hashes[name] = filehash(root/name)
         return json.loads(raw)
 
     manifest = read('manifest.json')
@@ -120,13 +116,11 @@ def run(root, analysis_file="ANALYSIS.json", output_suffix=""):
                 summaries[f'{arm}/{rule}/{setting}'] = result
     out = root/'role_analysis'
     out.mkdir(exist_ok=True)
-    plan = Path('docs/direct_reciprocity/ROLE_ANALYSIS_PLAN.md')
     result = dict(status='complete', design='post_hoc_fixed_pool_exact_expectations',
                   note='Exploratory unadjusted population-bootstrap intervals. No new model requests or games.',
                   bootstrap_seed=20260920, bootstrap_replicates=20000, independent_clusters=20,
-                  counts=dict(counts), summaries=summaries, rows=records, input_sha256=hashes,
+                  counts=dict(counts), summaries=summaries, rows=records,
                   pooled_arms=list(ARMS),
-                  plan_sha256=filehash(plan),
                   verification=dict(policy_edge_cases='passed', sealed_decisions_reconstructed=len(sealed),
                                     frozen_raw_and_selected_seed_values='passed', decomposition_identity='passed'))
     (out/f'ANALYSIS{output_suffix}.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')

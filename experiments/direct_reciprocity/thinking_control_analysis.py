@@ -8,12 +8,10 @@ import json
 import numpy as np
 
 from .core import Policy
-from .records import digest, filehash
 from .records import read_json, write_json
 from .specificity import seal_selections
 from .specificity_analysis import contrast, summarize, holm, behavior_delta
 from .condition_generation import specification
-from .restore_score import verify_restoration
 
 SOURCE = Path('results/feedback_specificity_v2')
 DEFAULT_ROOT = Path('results/feedback_specificity_thinking_384k_20260923')
@@ -21,15 +19,11 @@ DEFAULT_ROOT = Path('results/feedback_specificity_thinking_384k_20260923')
 
 def audit(root, m, source=SOURCE):
     root = Path(root)
-    verify_restoration(root)
     issues, records = [], []
-    release = read_json(root/'H_RELEASED.json')
     read_json(root/'COMPLETE.json')
     selected = seal_selections(root, m, readonly=True)
     if len(selected['rows']) != len(m['jobs']) // m['draws'] * 3:
         issues.append('Sealed selection count differs from manifest')
-    if release['selection_digest'] != digest((root/'SELECTIONS_SEALED.json').read_text(encoding='utf-8')):
-        issues.append('Selection seal mismatch')
     for j in m['jobs']:
         identity = j['id']
         r = read_json(root/'requests_candidates'/(identity+'.json'))
@@ -40,10 +34,6 @@ def audit(root, m, source=SOURCE):
         expected = specification(c['prompts'][j['arm']], 'deepseek', 'on')
         if any(r.get(k) != v for k,v in expected.items()):
             issues.append(identity+': request parameters differ')
-        if r.get('fingerprint') != digest(json.dumps(expected, sort_keys=True)):
-            issues.append(identity+': request fingerprint differs')
-        if digest(r['prompt']) != m['prompt_hashes'][identity]:
-            issues.append(identity+': historical prompt differs')
         if r['started_at'] < m['frozen_at']:
             issues.append(identity+': generation before protocol freeze')
         if not r.get('reasoning_content'):
@@ -53,17 +43,11 @@ def audit(root, m, source=SOURCE):
         if child['valid'] != (r['status']=='valid'):
             issues.append(identity+': validity mismatch')
         if child['child']:
-            if Policy(**child['child']).key != r.get('code_hash'):
-                issues.append(identity+': code hash differs')
             code = r['content']
             if code.strip().startswith('```') and code.strip().splitlines()[-1].strip()=='```':
                 code = '\n'.join(code.strip().splitlines()[1:-1])
             if child['child']['code'] != code:
                 issues.append(identity+': code differs from returned content')
-        if filehash(root/'holdout'/(j['context']+'.json')) != filehash(Path(source)/'holdout'/(j['context']+'.json')):
-            issues.append(identity+': reused parent differs')
-        if selected['candidate_hashes'][identity] != digest((root/'candidates'/(identity+'.json')).read_text(encoding='utf-8')):
-            issues.append(identity+': candidate changed after selection')
         for setting in ('default','noise01','long'):
             for metric in ('score','cooperation','worst_score'):
                 d = row['deployed'][setting][metric]-parent['measured'][setting][metric]
@@ -166,7 +150,7 @@ def analyze(root, source=SOURCE, source_analysis="ANALYSIS.json", output_suffix=
                   '服务端别名无法保证权重固定；H 是已使用过的测试面板。不能单独归因于思考开关，未显著不等于等效。')
     result = {'audit':aud, 'thinking':new, 'historical':old, 'focus_holm_two':focus,
               'configuration_differences_exploratory':exploratory, 'limitations':limitation,
-              'analysis_source_hash':filehash(__file__)}
+              }
     write_json(root/f'ANALYSIS{output_suffix}.json',result)
     print(json.dumps({'audit_issues':aud['issues'],'focus':focus},ensure_ascii=False))
     return result

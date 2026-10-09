@@ -42,7 +42,7 @@ Paths are relative to each experiment directory unless stated otherwise. ON and 
 | `manifest.json` | Population seeds, parent ranks, report conditions, candidate tasks and request settings |
 | `requests_initial/`, `initial/` | 240 initialization requests/responses and validated strategies, stored in DeepSeek OFF |
 | `populations/s200.json` ... `s219.json` | 12 strategies per population, training scores, feedback measurements and donor permutations without fixed points |
-| `contexts/s200-rank1.json` and related files | 60 shared parents, donors, complete prompts for all three conditions and length counts; Score report-block length is zero |
+| `contexts/s200-rank1.json` and related files | 60 shared parents, donors and complete prompts for all three conditions |
 | `requests_candidates/<id>.json` | API parameters, responses and usage; ON also includes visible reasoning |
 | `candidates/<id>.json` | Candidate programs |
 | `selection_scores/<id>.json` | Parent/candidate scores for S1, S2 and S3, independent of test outcomes |
@@ -83,7 +83,7 @@ uv run python -m experiments.direct_reciprocity.judge_mismatch_detection_summary
 
 Step 9 exports the matching-comparison `cross_model_mainline_data_reproduct.json`, plus three-condition `candidate_gains_reproduct.csv`, `population_gains_reproduct.csv` and `condition_statistics_reproduct.csv`. It also exports `score_baseline_data_reproduct.json`, `score_baseline_statistics_reproduct.csv` and `score_baseline_population_pairs_reproduct.csv`. These contain Raw and S3 Accurate-minus-Score and Mismatched-minus-Score estimates paired within each of the 20 populations. Intervals are unadjusted population bootstrap intervals; no new confirmatory tests are introduced. Invalid candidates and evaluation failures retain the parent, with zero deployed gain, and are reported in the Score summary. Step 10 exports `jev_recount_reproduct.json` for Accurate and Mismatched.
 
-Score prompts are shorter because the report block is absent. Consequently, contrasts with Score combine the presence of a report and its additional prompt length. They do not isolate report ownership or establish that models ignored mismatched reports.
+Report-versus-Score contrasts compare adding a report, whereas Accurate versus Mismatched compares report attribution.
 
 For an optional readable view of any analysis JSON, use the renderer below. It preserves stored values without running experiments or statistics, and writes Markdown beside the input with the same stem; `--output` selects another destination. The existing [distance narrative](docs/direct_reciprocity/MISMATCH_DISTANCE_ANALYSIS.md) and [Jev detail report](results/mismatch_detection_jev/REPORT.md) are retained as reference documents.
 

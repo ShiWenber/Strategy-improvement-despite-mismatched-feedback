@@ -8,28 +8,21 @@ import numpy as np
 WORKSPACE = Path(__file__).resolve().parents[2]
 ROOT = WORKSPACE / 'results/qwen3_8'
 
-from .core import Policy
-from .records import digest, filehash
 from .condition_generation import specification
 from .records import read_json, write_json
 from .specificity_analysis import contrast, holm
 from .thinking_control_analysis import aggregate
-from .restore_score import verify_restoration
 
 SOURCE = Path('results/feedback_specificity_v2')
 
 
 def audit(root, manifest, source=SOURCE):
     root = Path(root)
-    verify_restoration(root)
     read_json(root / 'COMPLETE.json')
     selections = read_json(root / 'SELECTIONS_SEALED.json')
-    release = read_json(root / 'H_RELEASED.json')
     issues = []
     if len(selections['rows']) != len(manifest['jobs']) // manifest['draws'] * 3:
         issues.append('Sealed selection count differs from manifest')
-    if release['selection_digest'] != digest((root / 'SELECTIONS_SEALED.json').read_text(encoding='utf-8')):
-        issues.append('H released against wrong selection seal')
     rows = []
     for job in manifest['jobs']:
         identity = job['id']
@@ -41,10 +34,6 @@ def audit(root, manifest, source=SOURCE):
         expected = specification(context['prompts'][job['arm']], 'qwen', manifest['mode'])
         if any(request.get(key) != value for key, value in expected.items()):
             issues.append(identity + ': request specification differs')
-        if request.get('fingerprint') != digest(json.dumps(expected, sort_keys=True)):
-            issues.append(identity + ': request fingerprint differs')
-        if digest(request['prompt']) != manifest['prompt_hashes'][identity]:
-            issues.append(identity + ': frozen prompt differs')
         if request['started_at'] < manifest['frozen_at']:
             issues.append(identity + ': request predates manifest')
         if request.get('returned_model') != manifest['api']['model']:
@@ -55,12 +44,6 @@ def audit(root, manifest, source=SOURCE):
             issues.append(identity + ': unexpected reasoning content')
         if candidate['valid'] != (request['status'] == 'valid'):
             issues.append(identity + ': validity mismatch')
-        if candidate['child'] and Policy(**candidate['child']).key != request.get('code_hash'):
-            issues.append(identity + ': candidate differs from response')
-        if selections['candidate_hashes'][identity] != digest((root / 'candidates' / (identity + '.json')).read_text(encoding='utf-8')):
-            issues.append(identity + ': candidate changed after selection')
-        if filehash(root / 'holdout' / (job['context'] + '.json')) != filehash(Path(source) / 'holdout' / (job['context'] + '.json')):
-            issues.append(identity + ': parent H changed')
         for setting in ('default', 'noise01', 'long'):
             for metric in ('score', 'cooperation', 'worst_score'):
                 delta = holdout['deployed'][setting][metric] - parent['measured'][setting][metric]

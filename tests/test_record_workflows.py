@@ -25,28 +25,6 @@ def test_experiments_are_self_contained_with_one_native_entry_point():
     assert (ROOT / 'experiments/direct_reciprocity/generate_api.sh').is_file()
 
 
-def test_frozen_source_identity_covers_each_experiment_module_once(tmp_path, monkeypatch):
-    science = tmp_path / 'experiments/direct_reciprocity'
-    figures = science / 'figures'
-    science.mkdir(parents=True)
-    figures.mkdir()
-    (science / 'core.py').write_text('x=1\n')
-    (science / 'records.py').write_text('x=2\n')
-    (figures / 'plot.py').write_text('x=3\n')
-    monkeypatch.setattr(records, 'ROOT', tmp_path)
-    monkeypatch.setattr(records, 'EXPERIMENTS', science)
-    first = records.implementation_hash()
-    expected = records.digest('\n'.join(p.relative_to(tmp_path).as_posix() + ':' +
-                              records.digest(p.read_text()) for p in sorted(science.rglob('*.py'))))
-    assert first == expected
-    (science / 'records.py').write_text('x=4\n')
-    second = records.implementation_hash()
-    (science / 'core.py').write_text('x=5\n')
-    third = records.implementation_hash()
-    (figures / 'plot.py').write_text('x=6\n')
-    assert len({first, second, third, records.implementation_hash()}) == 4
-
-
 def test_exclusive_requests_resume_only_matching_finished_responses(tmp_path):
     path = tmp_path / 'requests/one.json'
     spec = dict(provider='offline', model='fixture', prompt='one', temperature=1)

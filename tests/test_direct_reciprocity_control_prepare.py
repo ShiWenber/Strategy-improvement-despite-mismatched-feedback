@@ -4,7 +4,6 @@ from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import patch
 from experiments.direct_reciprocity.core import Config
-from experiments.direct_reciprocity.records import implementation_hash
 from experiments.direct_reciprocity.records import read_json, write_json
 from experiments.direct_reciprocity.control import prepare_control
 
@@ -18,8 +17,7 @@ class PrepareControlTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
             cfg=Config(population_size=4,eliminate=2,generations=3,rounds=2,repeats=1)
-            write_json(root/'matrix_plan.json',{'implementation_hash':implementation_hash(),
-                       'provider':'test','model':'mock'})
+            write_json(root/'matrix_plan.json', {'provider': 'test', 'model': 'mock'})
             write_json(root/'minimal__paper_truncation__seed0'/'config.json',{'config':asdict(cfg)})
             with patch('experiments.direct_reciprocity.control.Generator.generate',generate):
                 prepare_control(root,0)

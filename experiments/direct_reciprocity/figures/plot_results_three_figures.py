@@ -16,13 +16,14 @@ os.environ.setdefault('MPLCONFIGDIR', str(ROOT / 'tmp/results_figure_mplconfig')
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib.colors import to_hex, to_rgb
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from matplotlib.text import Text
 from matplotlib.ticker import FuncFormatter
 from matplotlib.transforms import Bbox
 import numpy as np
-from .results_plot_style import apply_style, panel_heading, panel_legend, IntervalKey
+from .results_plot_style import apply_style, panel_heading, panel_legend, IntervalKey, BLUE, ORANGE, DARK, GREY
 SOURCES = {}
 READ_KEYS = {}
 ANALYSIS_SUFFIX = ""
@@ -31,7 +32,16 @@ ORDER = ['DeepSeek/OFF', 'DeepSeek/ON', 'Qwen/OFF', 'Qwen/ON']
 DISPLAY_MODELS = {'DeepSeek': 'deepseek-v4.1-flash', 'Qwen': 'qwen3.8-flash'}
 SEEDS = list(range(200, 220))
 ARMS = ['accurate', 'mismatched']
-BLUE, ORANGE, DARK, GREY = ('#0072B2', '#D55E00', '#303030', '#737373')
+GAIN_CONDITIONS = ['mismatched', 'accurate', 'score']
+
+def raw_tint(color):
+    """Use the Fig. 3 condition color, mixed with 60% white, for Raw bars."""
+    return to_hex(0.4 * np.asarray(to_rgb(color)) + 0.6)
+
+GAIN_COLORS = {'mismatched': (raw_tint(ORANGE), ORANGE),
+               'accurate': (raw_tint(BLUE), BLUE),
+               'score': ('#9CD8C4', '#009E73')}
+GAIN_KEYS = [f'{stage}_{arm}' for arm in GAIN_CONDITIONS for stage in ['raw', 's3']]
 WIDTH, HEIGHT = (175 / 25.4, 138 / 25.4)
 
 def read(rel, keys):
@@ -48,13 +58,14 @@ def vector(report, stage, arm):
     else:
         values = report['selected']['S3/' + arm]['metrics']['default']['seed_values']
     result = np.asarray(values, dtype=float)
-    assert result.shape == (20,) and np.isfinite(result).all()
+    assert result.shape == (len(SEEDS),) and np.isfinite(result).all()
     return result
 
 def load():
     cross = read(INPUTS['cross_model'], ['statistics[*].raw_mismatched', 'statistics[*].s3_mismatched', 'statistics[*].raw_accurate_minus_mismatched'])['statistics']
     ds_off = read(INPUTS['deepseek_off'], ['raw[*].metrics.default/score.seed_values', 'selected[S3/*].metrics.default.seed_values'])
     ds_on = read(INPUTS['deepseek_on'], ['thinking.raw[*].metrics.default/score.seed_values', 'thinking.selected[S3/*].metrics.default.seed_values'])['thinking']
+    reports = {'DeepSeek/OFF': ds_off, 'DeepSeek/ON': ds_on}
     pairs = {}
     for cell, report in [('DeepSeek/OFF', ds_off), ('DeepSeek/ON', ds_on)]:
         pairs[cell] = {stage: np.mean([vector(report, stage, arm) for arm in ARMS], axis=0)
@@ -63,18 +74,29 @@ def load():
         manifest = read(INPUTS[f'qwen_{mode}_manifest'], ['seeds'])
         assert manifest['seeds'] == SEEDS
         report = read(INPUTS[f'qwen_{mode}_analysis'], ['result.raw[*].metrics.default/score.seed_values', 'result.selected[S3/*].metrics.default.seed_values'])['result']
+        reports['Qwen/' + mode.upper()] = report
         pairs['Qwen/' + mode.upper()] = {stage: np.mean([vector(report, stage, arm) for arm in ARMS], axis=0) for stage in ['raw', 'S3']}
     for cell in ORDER:
-        for key in ['raw_mismatched', 's3_mismatched', 'raw_accurate_minus_mismatched']:
+        report = reports[cell]
+        for arm in GAIN_CONDITIONS:
+            for stage in ['raw', 's3']:
+                metric = (report['raw'][arm]['metrics']['default/score'] if stage == 'raw'
+                          else report['selected']['S3/' + arm]['metrics']['default'])
+                key = f'{stage}_{arm}'
+                if key in cross[cell]:
+                    assert cross[cell][key] == metric
+                cross[cell][key] = metric
+        for key in [*GAIN_KEYS, 'raw_accurate_minus_mismatched']:
             row = cross[cell][key]
-            assert row['n_seeds'] == 20
+            assert row['n_seeds'] == len(SEEDS)
+            assert len(row['seed_values']) == len(SEEDS) and np.isfinite(row['seed_values']).all()
             assert abs(np.mean(row['seed_values']) - row['mean']) < 1e-12
             assert row['ci95'][0] < row['mean'] < row['ci95'][1]
         assert cross[cell]['raw_accurate_minus_mismatched']['ci95'][0] < 0 < cross[cell]['raw_accurate_minus_mismatched']['ci95'][1]
     opponents = read(INPUTS['opponents'], ['configs[*].summaries[raw/S3][accurate/mismatched][recovery/exploitation/random/memory].mean', 'configs[*].summaries[raw/S3][accurate/mismatched][recovery/exploitation/random/memory].ci95_exploratory_unadjusted'])
     behavior = read(INPUTS['behavior'], ['configs[*].summaries[controlled/pooled/defection_exposure][parent/raw/S3]', 'configs[*].summaries[controlled/pooled/recovery_rounds][parent/raw/S3]'])
     assert opponents['seeds'] == behavior['seeds'] == SEEDS
-    assert opponents['n_independent_populations'] == 20
+    assert opponents['n_independent_populations'] == len(SEEDS)
     for metric in ['defection_exposure', 'recovery_rounds']:
         key = 'controlled/pooled/' + metric
         assert behavior['configs']['non_thinking']['summaries'][key]['parent'] == behavior['configs']['thinking']['summaries'][key]['parent']
@@ -128,22 +150,31 @@ def figure2(cross, pairs):
     axb.set_ylim(3.55, -1.35)
     axb.set_yticks(range(4), [f'{DISPLAY_MODELS[model]}\n{mode}' for model, mode in (cell.split('/') for cell in ORDER)])
     clean(axb)
-    for key, offset, color in [('raw_mismatched', -0.17, GREY), ('s3_mismatched', 0.17, DARK)]:
+    group_width = 0.72
+    bar_width = group_width / len(GAIN_KEYS)
+    offsets = np.linspace(-group_width / 2 + bar_width / 2,
+                          group_width / 2 - bar_width / 2, len(GAIN_KEYS))
+    for key, offset in zip(GAIN_KEYS, offsets):
+        stage, arm = key.split('_')
+        color = GAIN_COLORS[arm][stage == 's3']
         rows = [cross[cell][key] for cell in ORDER]
         means = np.asarray([row['mean'] for row in rows])
         intervals = np.asarray([row['ci95'] for row in rows])
-        axa.bar(np.arange(4) + offset, means, width=0.28, color=color,
+        axa.bar(np.arange(len(ORDER)) + offset, means, width=bar_width,
                 yerr=np.stack([means - intervals[:, 0], intervals[:, 1] - means]),
-                capsize=2.5, error_kw={'ecolor': DARK, 'elinewidth': 1, 'capthick': 0.8}, zorder=3)
+                capsize=1, error_kw={'ecolor': 'black', 'elinewidth': 0.7, 'capthick': 0.7}, zorder=3)
     for index, cell in enumerate(ORDER):
         point_interval(axb, cross[cell]['raw_accurate_minus_mismatched'], index, DARK, 'o')
-    axa.set_xlim(-0.55, 3.55)
+    axa.set_xlim(-0.55, len(ORDER) - 0.45)
     axa.set_ylim(-0.02, 0.25)
     axa.set_yticks([0, 0.05, 0.1, 0.15, 0.2])
     axa.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f'{x:.2f}'))
-    axa.set_xticks(range(4), ['OFF', 'ON', 'OFF', 'ON'])
-    for model, center in [('DeepSeek', 0.5), ('Qwen', 2.5)]:
-        axa.text(center, -0.20, DISPLAY_MODELS[model], transform=axa.get_xaxis_transform(),
+    axa.set_xticks(range(len(ORDER)), [cell.split('/')[1] for cell in ORDER])
+    for model in dict.fromkeys(cell.split('/')[0] for cell in ORDER):
+        indices = [index for index, cell in enumerate(ORDER)
+                   if cell.split('/')[0] == model]
+        axa.text(np.mean(indices), -0.20, DISPLAY_MODELS[model],
+                 transform=axa.get_xaxis_transform(),
                  ha='center', va='top', fontsize=8.5)
     clean(axa, 'y')
     axa.set_ylabel('Payoff gain per round\nvs parent')
@@ -153,7 +184,7 @@ def figure2(cross, pairs):
     axb.set_xlabel('Raw Accurate − Mismatched\n(payoff per round)')
     headings = [panel_heading(fig, 'a', 'Mismatched: gains over parents', 0.025, 0.947),
                 panel_heading(fig, 'b', 'Correct report matching', 0.535, 0.947),
-                panel_heading(fig, 'c', f'Same-pool selection: S3 above Raw in {above_raw} of {20 * len(ORDER)} population pairs', 0.025, 0.470)]
+                panel_heading(fig, 'c', f'Same-pool selection: S3 above Raw in {above_raw} of {len(SEEDS) * len(ORDER)} population pairs', 0.025, 0.470)]
     axb.text(1, 1.01, 'Accurate higher →', transform=axb.transAxes, ha='right', fontsize=8.5, color='#505050')
     lefts = [0.165, 0.3775, 0.59, 0.8025]
     for i, (cell, left) in enumerate(zip(ORDER, lefts)):
@@ -179,13 +210,20 @@ def figure2(cross, pairs):
         ax.set_title(f'{DISPLAY_MODELS[model]}\n{mode}', fontsize=9, pad=5)
         fig.text(left + 0.08875, 0.04, f'{means[0]:+.3f} / {means[1]:+.3f}', ha='center', fontsize=8.5, color=DARK)
         assert np.min([row['raw'], row['S3']]) > -0.075 and np.max([row['raw'], row['S3']]) < 0.3
+    # Keep the six-entry legend in a header band, clear of all error bars.
+    axa.set_position([0.105, 0.605, 0.40, 0.210])
+    a_legend_ax = fig.add_axes([0.105, 0.825, 0.40, 0.112], frameon=False)
+    a_legend_ax.set_axis_off()
+    a_legend_ax.set_xticks([])
+    a_legend_ax.set_yticks([])
     c_legend_ax = fig.add_axes([0.105, 0.415, 0.875, 0.050], frameon=False)
     c_legend_ax.set_axis_off()
     c_legend_ax.set_xticks([])
     c_legend_ax.set_yticks([])
     register_style(fig, headings, [
-        ('a', axa, [Patch(facecolor=GREY), Patch(facecolor=DARK)],
-         ['Raw', 'S3'], 2),
+        ('a', a_legend_ax,
+         [Patch(facecolor=GAIN_COLORS[arm][index]) for index in range(2) for arm in GAIN_CONDITIONS],
+         [f'{stage}-{arm.capitalize()}' for stage in ['Raw', 'S3'] for arm in GAIN_CONDITIONS], 2),
         ('b', axb, [Line2D([], [], color=DARK, marker='o', lw=0)],
          ['Contrast'], 1),
         ('c', c_legend_ax, [Line2D([], [], color=GREY, marker='o', markerfacecolor='white', lw=0),
@@ -193,6 +231,14 @@ def figure2(cross, pairs):
                           Line2D([], [], color='#C1C1C1', lw=.65)],
          ['Raw mean', 'S3 mean', 'Population pair'], 3),
     ])
+    fig._results_layout = {
+        'panel_a': {'type': 'grouped vertical bars', 'configuration_order': ORDER,
+                    'condition_order': GAIN_CONDITIONS, 'stage_order': ['Raw', 'S3'],
+                    'colors': {arm: dict(zip(['Raw', 'S3'], GAIN_COLORS[arm])) for arm in GAIN_CONDITIONS},
+                    'estimator': f'Frozen mean payoff gain per round vs parent over {len(SEEDS)} populations',
+                    'interval': 'Frozen unadjusted 95% population-bootstrap confidence interval',
+                    'bar_count': len(ORDER) * len(GAIN_KEYS)},
+    }
     return fig
 
 def figure3(opponents, behavior):
@@ -404,13 +450,13 @@ def main():
         if number not in exports:
             continue
         qa = {'status': 'passed', 'asset': stem, 'figure_language': 'English',
-              'population_unit': 20, 'seed_order': SEEDS, 'source_hashes_unchanged': True,
+              'population_unit': len(SEEDS), 'seed_order': SEEDS, 'source_hashes_unchanged': True,
               'inputs_sha256': SOURCES, 'read_keys': READ_KEYS,
               **exports[number],
               'figure1_unchanged': True,
               'science_unchanged': 'Frozen means and stored intervals; render-only changes.'}
         (qa_directory / f'{stem}_qa_reproduct.json').write_text(json.dumps(qa, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    report = {'status': 'passed', 'source_hashes_unchanged': True, 'new_games': 0, 'new_model_calls': 0, 'new_bootstraps': 0, 'new_tests': 0, 'population_unit': 20, 'configuration_order': ORDER, 'seed_order': SEEDS, 'sources_sha256': SOURCES, 'read_keys': READ_KEYS, 'exports': exports, 'figure2a_b': {cell: {key: {f: row[f] for f in ['mean', 'ci95']} for key, row in cross[cell].items() if key in ['raw_mismatched', 's3_mismatched', 'raw_accurate_minus_mismatched']} for cell in ORDER}, 'figure2c': {cell: {stage: float(values.mean()) for stage, values in pairs[cell].items()} for cell in ORDER}, 'figure2c_pairs_above_raw': {'total': int(sum((pairs[cell]['S3'] > pairs[cell]['raw']).sum() for cell in ORDER)), 'of': 20 * len(ORDER), 'by_cell': {cell: int((pairs[cell]['S3'] > pairs[cell]['raw']).sum()) for cell in ORDER}, 'minimum_pair_difference': float(min((pairs[cell]['S3'] - pairs[cell]['raw']).min() for cell in ORDER))}, 'figure3a_b': {config: {stage: {arm: {family: {'mean': row['mean'], 'ci95': row['ci95_exploratory_unadjusted']} for family, row in arm_rows.items() if family != 'overall'} for arm, arm_rows in stage_rows.items()} for stage, stage_rows in c['summaries'].items()} for config, c in opponents['configs'].items()}, 'figure3c_d': {config: {metric: {stage: {'mean': row['mean'], 'ci95': row['ci95_exploratory']} for stage, row in c['summaries']['controlled/pooled/' + metric].items() if stage in ['parent', 'raw', 'S3']} for metric in ['defection_exposure', 'recovery_rounds']} for config, c in behavior['configs'].items()}, 'figure1_unchanged': True, 'figure_language': 'English only; one shared asset set', 'note': 'Figure2c computes existing within-population equal-condition means only; all intervals are reused frozen values.'}
+    report = {'status': 'passed', 'source_hashes_unchanged': True, 'new_games': 0, 'new_model_calls': 0, 'new_bootstraps': 0, 'new_tests': 0, 'population_unit': len(SEEDS), 'configuration_order': ORDER, 'seed_order': SEEDS, 'sources_sha256': SOURCES, 'read_keys': READ_KEYS, 'exports': exports, 'figure2a_b': {cell: {key: {f: row[f] for f in ['mean', 'ci95']} for key, row in cross[cell].items() if key in [*GAIN_KEYS, 'raw_accurate_minus_mismatched']} for cell in ORDER}, 'figure2c': {cell: {stage: float(values.mean()) for stage, values in pairs[cell].items()} for cell in ORDER}, 'figure2c_pairs_above_raw': {'total': int(sum((pairs[cell]['S3'] > pairs[cell]['raw']).sum() for cell in ORDER)), 'of': len(SEEDS) * len(ORDER), 'by_cell': {cell: int((pairs[cell]['S3'] > pairs[cell]['raw']).sum()) for cell in ORDER}, 'minimum_pair_difference': float(min((pairs[cell]['S3'] - pairs[cell]['raw']).min() for cell in ORDER))}, 'figure3a_b': {config: {stage: {arm: {family: {'mean': row['mean'], 'ci95': row['ci95_exploratory_unadjusted']} for family, row in arm_rows.items() if family != 'overall'} for arm, arm_rows in stage_rows.items()} for stage, stage_rows in c['summaries'].items()} for config, c in opponents['configs'].items()}, 'figure3c_d': {config: {metric: {stage: {'mean': row['mean'], 'ci95': row['ci95_exploratory']} for stage, row in c['summaries']['controlled/pooled/' + metric].items() if stage in ['parent', 'raw', 'S3']} for metric in ['defection_exposure', 'recovery_rounds']} for config, c in behavior['configs'].items()}, 'figure1_unchanged': True, 'figure_language': 'English only; one shared asset set', 'note': 'Figure2c computes existing within-population equal-condition means only; all intervals are reused frozen values.'}
     print(json.dumps(report, ensure_ascii=False, indent=2))
 if __name__ == '__main__':
     if hasattr(sys.stdout, 'reconfigure'):

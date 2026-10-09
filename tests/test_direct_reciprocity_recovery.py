@@ -14,7 +14,7 @@ class EvaluationRecoveryTests(unittest.TestCase):
             root = Path(temp)
             cells = [{'seed': 0, 'prompt': p, 'selection': 'paper_truncation'} for p in ('minimal', 'score')]
             write_json(root/'matrix_plan.json', {'cells': cells, 'generations': 1,
-                       'rounds': 100, 'implementation_hash': 'test'})
+                       'rounds': 100})
             for cell in cells:
                 folder = root/f"{cell['prompt']}__paper_truncation__seed0"
                 failed = cell['prompt'] == 'score'
@@ -27,7 +27,7 @@ class EvaluationRecoveryTests(unittest.TestCase):
                          'holdout': {'default': result}, 'test_configs': {'default': {'rounds': 100}}}
                 write_json(folder/'generation_000.json', state)
                 write_json(folder/'complete.json', {})
-                write_json(folder/'config.json', {'implementation_hash': 'test'})
+                write_json(folder/'config.json', {})
             report = summarize(root)
             failed = next(r for r in report['group_summaries'] if r['prompt']=='score')
             self.assertEqual(failed['runtime_failures'], 1)

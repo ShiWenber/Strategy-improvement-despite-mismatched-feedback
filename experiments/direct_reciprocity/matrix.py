@@ -6,7 +6,6 @@ import subprocess
 import sys
 import time
 from .records import write_json, read_json
-from .records import implementation_hash
 
 
 def cells(seeds):
@@ -18,7 +17,7 @@ def run_matrix(args,model):
     if args.workers < 1 or len(set(args.seeds)) != len(args.seeds):
         raise ValueError('workers must be positive and seeds unique')
     root=Path(args.output).resolve()
-    manifest={'initial_source':str(args.initial_source.resolve()) if args.initial_source else None,'implementation_hash':implementation_hash(),'model':model,'provider':args.provider,
+    manifest={'initial_source':str(args.initial_source.resolve()) if args.initial_source else None,'model':model,'provider':args.provider,
               'generations':args.generations,'population_size':args.population_size,
               'eliminate':args.eliminate,'rounds':args.rounds,'repeats':args.repeats,
               'cells':cells(args.seeds)}

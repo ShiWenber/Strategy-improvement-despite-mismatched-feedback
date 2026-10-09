@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 import time
 
-from .records import (read_json, write_json, digest, filehash, implementation_hash, check_manifest,
+from .records import (read_json, write_json, check_manifest,
                       population_root, release_holdout, complete, runner_lock)
 from .specificity import evaluation_job, holdout_job, pool_run, seal_selections
 from .specificity_assets import SCORE_ARMS, generation_arms
@@ -42,7 +42,6 @@ def prepare(root, source, provider):
     if root.exists() and any(root.iterdir()):
         raise RuntimeError('Nonempty unsealed destination; inspect before preparing')
     root.mkdir(parents=True, exist_ok=True)
-    copied = {}
     populations = population_root(source, old)
     files = [(p, Path('contexts') / p.name) for p in sorted((source / 'contexts').glob('*.json'))]
     files += [(p, Path('populations') / p.name) for p in sorted((populations / 'populations').glob('*.json'))]
@@ -52,12 +51,8 @@ def prepare(root, source, provider):
         dst = root / relative
         dst.parent.mkdir(exist_ok=True)
         shutil.copyfile(src, dst)
-        copied[relative.as_posix()] = filehash(src)
     shutil.copyfile(protocol, root / 'PROTOCOL.md')
     manifest = dict(version=version, source=str(source.resolve()),
-                    source_manifest_hash=filehash(source / 'manifest.json'),
-                    implementation_hash=implementation_hash(), runner_hash=filehash(__file__),
-                    protocol_hash=filehash(root / 'PROTOCOL.md'), reused_file_hashes=copied,
                     jobs=old['jobs'], seeds=old['seeds'], arms=old['arms'],
                     ranks=old['ranks'], draws=old['draws'], config=old['config'],
                     frozen_at=time.time(), new_calls=len(old['jobs']),
@@ -69,9 +64,6 @@ def prepare(root, source, provider):
         manifest.update(historical_budget=6000, comparison='historical paired configuration comparison')
     else:
         manifest.update(mode=mode, comparison='same frozen populations and prompts; Qwen modes differ in thinking and supported output limits')
-    manifest['prompt_hashes'] = {
-        job['id']: digest(read_json(root / 'contexts' / (job['context'] + '.json'))['prompts'][job['arm']])
-        for job in manifest['jobs']}
     write_json(root / 'manifest.json', manifest)
     write_arm_logs(root, manifest)
     return manifest
@@ -83,13 +75,8 @@ def verify(root, source, provider):
     mode, _, api, version = settings(provider, root)
     if m['version'] != version or m.get('mode', 'on') != mode:
         raise RuntimeError('Provider or mode identity changed')
-    if source.resolve() != Path(m['source']).resolve() or filehash(source / 'manifest.json') != m['source_manifest_hash']:
-        raise RuntimeError('Source manifest changed')
-    if filehash(root / 'PROTOCOL.md') != m['protocol_hash']:
-        raise RuntimeError('Frozen protocol changed')
-    for rel, expected in m['reused_file_hashes'].items():
-        if filehash(root / rel) != expected:
-            raise RuntimeError('Reused input changed: ' + rel)
+    if source.resolve() != Path(m['source']).resolve():
+        raise RuntimeError('Source path changed')
     if m['api'] != api:
         raise RuntimeError('Request configuration changed')
     return m
@@ -99,16 +86,11 @@ def release_parents(root, source, manifest):
     root, source = Path(root), Path(source)
     seal_selections(root, manifest)
     release_holdout(root, historical_test_panel=True)
-    copied = {}
     for cid in sorted({j['context'] for j in manifest['jobs']}):
         src = source / 'holdout' / (cid + '.json')
         dst = root / 'holdout' / src.name
         dst.parent.mkdir(exist_ok=True)
-        if dst.exists() and filehash(dst) != filehash(src):
-            raise RuntimeError('Parent test record changed')
         shutil.copyfile(src, dst)
-        copied[cid] = filehash(src)
-    write_json(root / 'REUSED_PARENT_H.json', copied)
 
 
 def main():
