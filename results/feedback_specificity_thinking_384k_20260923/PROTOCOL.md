@@ -1,3 +1,0 @@
-# Native-thinking configuration
-
-The published dataset retains 240 original Accurate and Mismatched candidates at the same 60 parents from 20 populations. Original prompts and submission positions are preserved. API identifier: deepseek-flash; temperature=1; thinking enabled; reasoning_effort=high; max_tokens=384000; streaming usage recorded. Reuse the parent selection evaluations. Seal 360 S1/S2/S3 decisions before H evaluation. This configuration differs from OFF in both native thinking and output budget and was collected subsequently. Archive subset metadata records the removal of unrelated conditions; it is not a newly preregistered experiment. New experiments must use new output directories.

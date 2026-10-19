@@ -17,7 +17,16 @@ def write_json(path, data):
     path.parent.mkdir(parents=True,exist_ok=True)
     temp = path.with_suffix(path.suffix+'.tmp')
     temp.write_text(json.dumps(data,indent=2,ensure_ascii=False),encoding='utf-8')
-    temp.replace(path)
+    # Windows scanners/readers can briefly deny replacement of an existing file.
+    # Retry the atomic rename, never the model request that produced this data.
+    for attempt in range(8):
+        try:
+            temp.replace(path)
+            break
+        except PermissionError:
+            if attempt == 7:
+                raise
+            time.sleep(min(.02 * 2 ** attempt, .5))
 
 
 def read_json(path):
@@ -35,11 +44,7 @@ def request_budget(paths, generation=None):
             records.append(record)
     return {'requests':len(records),'valid':sum(r['status']=='valid' for r in records),
             'invalid':sum(r['status']=='invalid' for r in records),
-            'api_errors':sum(r['status']=='api_error' for r in records),
-            'unknown_usage':sum(r.get('usage') is None for r in records),
-            'total_tokens':sum((r.get('usage') or {}).get('total_tokens',0) for r in records),
-            'prompt_tokens':sum((r.get('usage') or {}).get('prompt_tokens',0) for r in records),
-            'completion_tokens':sum((r.get('usage') or {}).get('completion_tokens',0) for r in records)}
+            'api_errors':sum(r['status']=='api_error' for r in records)}
 
 
 def population_root(root, manifest=None):
@@ -56,7 +61,6 @@ def check_manifest(root):
     manifest = read_json(Path(root) / 'manifest.json')
     if 'archive_projection' in manifest:
         raise RuntimeError('Historical archive is read-only; freeze a new output directory and reuse its initialization with --source')
-    population_root(root, manifest)
     return manifest
 
 

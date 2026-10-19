@@ -1,4 +1,4 @@
-"""Render figures and audit fonts and bounds; no analysis."""
+"""Explicit, optional figure layout audits; default renderers do not call these."""
 from pathlib import Path
 import json,re
 from matplotlib.text import Text
@@ -64,11 +64,12 @@ def validate_panel_layout(fig,stem):
     titles=[ax.get_title(loc='left') for ax in fig.axes]
     assert all(re.fullmatch(r'\([a-z]\)\s+\S[\s\S]*',t) for t in titles),(stem,titles)
     assert [re.match(r'\(([a-z])\)',t)[1] for t in titles]==[chr(97+i) for i in range(len(titles))]
-    expected={'figS1':6,'figS2':3,'figS3':2,'figS4':4,'figS5':4,'figS6':2}
+    expected={'figS1':6,'figS2':2,'figS3':2,'figS4':4,'figS5':4,'figS6':2}
     assert len(legends)==expected[stem]
     return {'minimum_font_pt':min(fonts),'maximum_font_pt':max(fonts),'out_of_canvas_text':outside,'legends':legends,'panel_titles':titles,'figure_legend_count':0,'legend_position':'one independent legend in the upper part of each lettered panel'}
 
-def render_audit(fig,stem,inputs,script,legend_labels,notes=None, *, output_dir=None, audit_dir=None):
+def render_audit(fig,stem,legend_labels,notes=None, *, output_dir=None, audit_dir=None):
+    """Explicitly validate, render and record a figure audit when requested."""
     layout=validate_panel_layout(fig,stem)
     source=Path(output_dir).resolve() if output_dir else ROOT/'reproduct'
     audit=Path(audit_dir).resolve() if audit_dir else AUDIT

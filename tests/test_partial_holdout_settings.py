@@ -121,7 +121,7 @@ def test_long_uses_evaluable_matched_contexts_without_imputing_missing_populatio
         assert long['seed_values'] == [2.5] and long['mean'] == 2.5
         assert long['missing_contexts'] == ['s1-rank1']
         assert report['selected']['S3/' + arm]['metrics']['long']['seed_values'] == [3.]
-    destination = role_analysis.run(tmp_path, 'ANALYSIS_reproduct.json', '_reproduct')
+    destination = role_analysis.run(tmp_path, output_suffix='_reproduct')
     policy = read_json(destination / 'ANALYSIS_reproduct.json')
     assert policy['counts']['accurate']['candidates'] == 4
     long_policy = policy['summaries']['accurate/S3/long']
@@ -152,8 +152,7 @@ def test_complete_batches_keep_the_existing_scientific_output_schema(tmp_path):
     assert set(report['raw']['accurate']) == {'n', 'valid', 'metrics', 'behavior', 'fallbacks'}
     assert set(report['selected']['S3/accurate']) == {'n', 'accepted', 'metrics'}
     assert set(report['raw']['accurate']['metrics']['long/score']) == {'n_seeds', 'seed_values', 'mean', 'ci95'}
-    write_json(tmp_path / 'ANALYSIS_reproduct.json', report)
-    output = role_analysis.run(tmp_path, 'ANALYSIS_reproduct.json', '_reproduct')
+    output = role_analysis.run(tmp_path, output_suffix='_reproduct')
     policies = read_json(output / 'ANALYSIS_reproduct.json')
     assert set(policies['summaries']['accurate/S3/long']['R']) == {'mean', 'ci95', 'seed_values'}
 
@@ -184,8 +183,7 @@ def test_entirely_unavailable_long_setting_has_null_estimates_and_keeps_primary(
         assert long['estimable'] is False and len(long['missing_contexts']) == 2
         selected = report['selected']['S3/' + arm]['metrics']['long']
         assert selected['mean'] is None and selected['seed_values'] == []
-    write_json(tmp_path / 'ANALYSIS_reproduct.json', report)
-    output = role_analysis.run(tmp_path, 'ANALYSIS_reproduct.json', '_reproduct')
+    output = role_analysis.run(tmp_path, output_suffix='_reproduct')
     policy = read_json(output / 'ANALYSIS_reproduct.json')
     assert policy['summaries']['pooled/S3/long']['R']['mean'] is None
 

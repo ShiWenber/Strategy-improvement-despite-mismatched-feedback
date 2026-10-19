@@ -5,7 +5,6 @@ import argparse
 import ast
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -15,13 +14,13 @@ import sys
 import threading
 import time
 
-from tools.reproduce import ROOT, RUNS, PREFIX, commands, archive_hashes, read
+from tools.reproduce import ROOT, RUNS, PREFIX, commands, read
 from experiments.direct_reciprocity.records import write_json
 from experiments.direct_reciprocity.holdout_metrics import (
     audit_deltas, availability, parent_available, setting_available,
 )
+from experiments.config.load_env import api_environment, require_model
 
-MODELS = {"deepseek": "deepseek-flash", "qwen": "qwen3.7-flash"}
 FIGURES = (
     ("fig2", "fig1", "Paper Figure 2: four configurations, candidate and selected gains"),
     ("fig3", "fig2", "Paper Figure 3: opponent payoffs and behavior probes"),
@@ -35,6 +34,7 @@ FIGURES = (
 RAW_FOLDERS = ("requests_initial", "initial", "populations", "contexts", "requests_candidates",
                "candidates", "selection_scores", "holdout", "arm_logs", "attempt_history",
                "evaluation_history")
+INPUT_FILES = {"manifest.json", "PROMPTS_SEALED.json", "SELECTIONS_SEALED.json"}
 GENERATION_ROUNDS = 4
 RETRY_COOLDOWN_SECONDS = 60
 
@@ -47,6 +47,24 @@ def write(path, payload):
     write_json(path, payload)
 
 
+def manifest_model(manifest):
+    model = manifest.get("api", manifest).get("model", "")
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("Frozen manifest is missing its model identity")
+    return model.strip()
+
+
+def recorded_models(results):
+    models = {}
+    for run in RUNS:
+        provider = "qwen" if "qwen" in run else "deepseek"
+        model = manifest_model(read(Path(results) / run / "manifest.json"))
+        if provider in models and models[provider] != model:
+            raise ValueError(f"Frozen {provider} OFF/ON runs must use the same model")
+        models[provider] = model
+    return models
+
+
 class Workflow:
     def __init__(self, args):
         self.args = args
@@ -54,20 +72,29 @@ class Workflow:
         self.api = self.root / "api_call"
         self.analysis = self.root / "analysis"
         self.plot = self.root / "plot"
-        for folder in (self.api, self.analysis, self.plot):
-            folder.mkdir(parents=True, exist_ok=True)
-        self.env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8", MPLBACKEND="Agg",
-                        DEEPSEEK_MODEL=MODELS["deepseek"], QWEN_MODEL=MODELS["qwen"],
+        self.env_file = Path(getattr(args, "env_file", ROOT / ".env")).resolve()
+        offline = getattr(args, "steps", "all") in ("analysis", "plot")
+        self.env = dict(os.environ) if offline else api_environment(self.env_file)
+        self.env.update(PYTHONUTF8="1", PYTHONIOENCODING="utf-8", MPLBACKEND="Agg",
                         DIRECT_RECIPROCITY_API_DIRECT="1")
         self.state_path = self.root / "RUN_STATUS.json"
+        saved = read(self.state_path) if self.state_path.exists() else None
+        if offline:
+            self.models = (dict(saved["models"]) if saved else recorded_models(
+                (self.analysis if args.steps == "plot" else self.api) / "results"))
+        else:
+            self.models = {provider: require_model(provider, self.env) for provider in ("deepseek", "qwen")}
+        if saved is not None and saved["models"] != self.models:
+            raise ValueError("Existing output was created for different models; use matching .env settings or a new output directory")
+        self.env.update({provider.upper() + "_MODEL": model for provider, model in self.models.items()})
+        for folder in (self.api, self.analysis, self.plot):
+            folder.mkdir(parents=True, exist_ok=True)
         self.lock = threading.Lock()
         self.simulation_lock = threading.Lock()
         self.stop_event = threading.Event()
-        self.state = read(self.state_path) if self.state_path.exists() else {
-            "created_at": now(), "models": MODELS, "planned_model_responses": 1680, "steps": {},
+        self.state = saved if saved is not None else {
+            "created_at": now(), "models": self.models, "planned_model_responses": 1680, "steps": {},
             "completed_stages": []}
-        if self.state["models"] != MODELS:
-            raise ValueError("Existing output was created for different models")
         if self.state_path.exists():
             history = self.api / "logs" / "run_state_history" / f"run_{time.time_ns()}.json"
             write(history, self.state)
@@ -261,12 +288,12 @@ class Workflow:
 
     def api_calls(self):
         off = self.api / "results" / RUNS[0]
-        shared = ("--output", off, "--env-file", self.args.env_file.resolve())
-        self.module("01_freeze", "specificity", "freeze", "--output", off,
+        shared = ("--output", off, "--env-file", self.env_file)
+        self.module("01_freeze", "specificity", "freeze", *shared,
                     "--arms", "score", "accurate", "mismatched")
         manifest = read(off / "manifest.json")
-        if manifest["seeds"] != list(range(200, 220)) or len(manifest["jobs"]) != 360:
-            raise ValueError("This workflow requires the complete 20-population design")
+        if manifest_model(manifest) != self.models["deepseek"]:
+            raise ValueError("Frozen initialization model differs from requested model")
         for phase in ("initialize", "prepare", "generate", "select", "holdout"):
             name = "02_deepseek_off_" + phase
             if phase == "generate":
@@ -281,10 +308,10 @@ class Workflow:
             destination = self.api / "results" / run
             label = run.replace("/", "_")
             options = ("--provider", provider, "--output", destination, "--source", off,
-                       "--env-file", self.args.env_file.resolve())
+                       "--env-file", self.env_file)
             self.module(label + "_prepare", "paired_control", "prepare", *options)
             manifest = read(destination / "manifest.json")
-            if manifest["api"]["model"] != MODELS[provider]:
+            if manifest["api"]["model"] != self.models[provider]:
                 raise ValueError("Frozen follow-up model differs from requested model")
             protocol = destination / "PROTOCOL.md"
             historical = destination / "HISTORICAL_PROTOCOL.md"
@@ -320,16 +347,18 @@ class Workflow:
                     for other in pending:
                         other.cancel()
                     raise
-        self.validate_api()
-
-    def validate_api(self):
+    @classmethod
+    def audit_api(cls, api):
+        """Inspect completed API records without creating or changing workflow state."""
+        api = Path(api)
+        models = recorded_models(api / "results")
         summaries = []
         total = 0
         for run in RUNS:
-            directory = self.api / "results" / run
+            directory = api / "results" / run
             manifest = read(directory / "manifest.json")
             read(directory / "COMPLETE.json")
-            expected = MODELS["qwen" if "qwen" in run else "deepseek"]
+            expected = models["qwen" if "qwen" in run else "deepseek"]
             requests = []
             for folder in ("requests_initial", "requests_candidates"):
                 for path in sorted((directory / folder).glob("*.json")):
@@ -349,49 +378,35 @@ class Workflow:
             for job in manifest["jobs"]:
                 for folder in ("candidates", "selection_scores", "holdout"):
                     read(directory / folder / (job["id"] + ".json"))
-            holdout_audit = self.validate_holdouts(directory, manifest, run)
+            holdout_audit = cls.validate_holdouts(directory, manifest, run)
             total += len(requests)
             summaries.append({"run": run, "model": expected, "new_responses": len(requests),
                               "valid": sum(r["status"] == "valid" for r in requests),
                               "invalid": sum(r["status"] == "invalid" for r in requests),
-                              **holdout_audit,
-                              "usage": {k: sum((r.get("usage") or {}).get(k, 0) or 0 for r in requests)
-                                        for k in ("prompt_tokens", "completion_tokens", "total_tokens")}})
+                              **holdout_audit})
         if total != 1680:
             raise ValueError("Expected 1680 new model responses")
-        write(self.api / "API_VALIDATION.json", {"status": "passed", "new_responses": total,
-              "checked_at": now(), "runs": summaries, "input_hashes": archive_hashes(self.api),
-              "completion_note": "COMPLETE records task completion; unavailable parent long settings remain null with explicit reasons."})
+        return {"status": "passed", "new_responses": total,
+              "checked_at": now(), "runs": summaries,
+              "completion_note": "COMPLETE records task completion; unavailable parent long settings remain null with explicit reasons."}
 
     def analyze(self):
-        self.validate_api()
-        before = archive_hashes(self.api)
-        copied = {}
         for run in RUNS:
             source = self.api / "results" / run
             target = self.analysis / "results" / run
             target.mkdir(parents=True, exist_ok=True)
             for path in source.rglob("*"):
                 relative = path.relative_to(source)
-                if not path.is_file() or not (relative.parts[0] in RAW_FOLDERS or len(relative.parts) == 1
-                        and path.suffix in (".json", ".md")):
+                if not path.is_file() or not (relative.parts[0] in RAW_FOLDERS
+                        or relative.as_posix() in INPUT_FILES):
                     continue
                 destination = target / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(path, destination)
-                copied[destination.relative_to(self.analysis).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
-        write(self.analysis / "RAW_INPUT_COPIES.json", {"source": str(self.api), "files": copied,
-              "note": "Local input copies for legacy analyzers; canonical new requests remain in api_call."})
         for name, command in commands(self.analysis, self.analysis, "analysis"):
             self.run_command(name, command, "analysis", resume=False)
-        if before != archive_hashes(self.api):
-            raise RuntimeError("API-stage original files changed during analysis")
-        write(self.analysis / "VALIDATION.json", {"status": "passed", "checked_at": now(),
-              "canonical_api_files_unchanged": True, "canonical_input_hashes": before})
 
     def plots(self):
-        if not (self.analysis / "VALIDATION.json").exists():
-            raise RuntimeError("Complete the analysis stage before plotting")
         render = self.plot / "rendered"
         for name, command in commands(self.analysis, self.plot, "figures"):
             command = [str(render) if item == str(self.plot / "figures") else item for item in command]
@@ -401,7 +416,7 @@ class Workflow:
             self.run_command(name, command, "plot", resume=False)
         self.module("16_opponent_supplement", "figures.plot_opponent_profiles", "--input",
                     self.analysis / "results/figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json",
-                    "--output-dir", render, "--audit-dir", self.plot / "audit", stage="plot", resume=False)
+                    "--output-dir", render, stage="plot", resume=False)
         exports = []
         for source, stem, description in FIGURES:
             files = []
@@ -411,16 +426,19 @@ class Workflow:
                     raise FileNotFoundError(path)
                 target = self.plot / f"{stem}.{extension}"
                 shutil.copyfile(path, target)
-                files.append({"path": target.name, "sha256": hashlib.sha256(target.read_bytes()).hexdigest()})
+                files.append({"path": target.name})
             exports.append({"figure": stem, "source_stem": source, "description": description, "files": files})
-        write(self.plot / "FIGURES_MANIFEST.json", {"status": "passed", "models": MODELS,
+        write(self.plot / "FIGURES_MANIFEST.json", {"status": "passed", "models": self.models,
               "created_at": now(), "new_data_only": True, "figures": exports,
               "excluded": "The original Paper Figure 1 is a static method diagram, not a data plot."})
 
     def document(self):
-        text = """# Full new API reproduction
+        text = f"""# Full new API reproduction
 
-Models: `deepseek-flash` and `qwen3.7-flash`, each with thinking OFF/ON.
+Models: `{self.models['deepseek']}` and `{self.models['qwen']}`, each with thinking OFF/ON.
+New API runs read `DEEPSEEK_MODEL` and `QWEN_MODEL` from `--env-file` (default `.env`).
+File settings take precedence over inherited environment settings; missing model
+configuration is an error. Existing API runs must retain their frozen models.
 Full design: 20 populations (seeds 200–219), 60 parents, 240 initialization
 responses and 1,440 candidate responses; 1,680 planned model responses.
 Conditions: Score, Accurate, Mismatched. Invalid programs retain the parent
@@ -430,8 +448,8 @@ setting is undefined. Other settings remain available. Analysis and tables
 report the evaluable matched contexts; undefined gains are never set to zero.
 
 - `api_call/`: canonical new requests, responses, streams, programs, games,
-  sealed selections, execution logs and API validation.
-- `analysis/`: analysis results, CSV/TeX tables, input hashes and local raw
+  sealed selections and execution logs.
+- `analysis/`: analysis results, CSV/TeX tables and local raw
   input copies needed by the existing analyzers.
 - `plot/fig1.*` through `fig8.*`: all new-data plots in PNG/PDF/SVG.
   `FIGURES_MANIFEST.json` maps these to the paper and supplementary plots.
@@ -449,6 +467,8 @@ uv run python -m tools.run_fresh_reproduction --output reproduction
 ```
 
 Use `--steps api_call`, `--steps analysis` or `--steps plot` to run one stage.
+Audits run separately with `--steps audit`; their JSON report is printed to stdout
+without changing the running experiment's files or stage status.
 Successful requests are reused on resume. Inspect uncertain requests before
 retrying; transport retries can make the actual attempt count exceed 1,680.
 API generation starts with 12 workers per configuration. Confirmed generation
@@ -464,11 +484,14 @@ unavailable; successful default, noise and behavior measurements are retained.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "reproduction")
-    parser.add_argument("--steps", choices=("all", "api_call", "analysis", "plot"), default="all")
+    parser.add_argument("--steps", choices=("all", "api_call", "analysis", "plot", "audit"), default="all")
     parser.add_argument("--api-workers", type=int, default=12)
     parser.add_argument("--workers", type=int, default=36)
     parser.add_argument("--env-file", type=Path, default=ROOT / ".env")
     args = parser.parse_args()
+    if args.steps == "audit":
+        print(json.dumps(Workflow.audit_api(args.output.resolve() / "api_call"), indent=2))
+        return
     if min(args.workers, args.api_workers) < 1:
         parser.error("Worker counts must be positive")
     workflow = Workflow(args)

@@ -1,9 +1,15 @@
-"""Guard the matching mainline and restored exploratory Score archive."""
+"""Guard required paper inputs and statistics, with optional provenance checks."""
 from collections import Counter
+import hashlib
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
 
 import pytest
+
+from tools import reproduce
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ['feedback_specificity_v2', 'feedback_specificity_thinking_384k_20260923',
@@ -26,31 +32,37 @@ def test_archive_contains_complete_matching_and_score_pools(relative):
     assert all(n == 2 for n in Counter((j['context'], j['arm']) for j in jobs).values())
     identities = {j['id'] for j in jobs}
     contexts = {j['context'] for j in jobs}
-    for folder in ['candidates', 'requests_candidates']:
-        assert {p.stem for p in (root / folder).glob('*.json')} == identities
-    for folder in ['holdout', 'selection_scores']:
-        assert {p.stem for p in (root / folder).glob('*.json')} == identities | contexts
+    required = reproduce.paper_input_paths(ROOT)
+    expected = {'holdout': identities | contexts,
+                'selection_scores': identities | contexts if relative == RUNS[0]
+                else {j['id'] for j in jobs if j['arm'] == 'score'}}
+    if relative in RUNS[:2]:
+        expected.update(contexts=contexts,
+                        populations={f's{seed}' for seed in manifest['seeds']},
+                        candidates={j['id'] for j in jobs if j['arm'] in ('accurate', 'mismatched')})
+    for folder, names in expected.items():
+        assert {p.stem for p in required if p.parent == root / folder} == names
+        assert all((root / folder / (name + '.json')).is_file() for name in names)
+    assert not any(p.parent == root / 'requests_candidates' for p in required)
     selections = read(root / 'SELECTIONS_SEALED.json')['rows']
     assert len(selections) == 540
     assert {r['arm'] for r in selections} == set(manifest['arms'])
     for job in jobs:
-        context = read(root / 'contexts' / (job['context'] + '.json'))
-        request = read(root / 'requests_candidates' / (job['id'] + '.json'))
-        assert set(context['prompts']) == set(manifest['arms'])
-        assert set(context['block_tokens']) == set(manifest['arms'])
-        assert request['prompt'] == context['prompts'][job['arm']]
+        if relative in RUNS[:2]:
+            context = read(root / 'contexts' / (job['context'] + '.json'))
+            assert set(context['prompts']) == set(manifest['arms'])
         # Keep original identifiers/positions, even when their positions have gaps.
         assert job['id'].endswith('pos' + str(job['position']))
 
 
 @pytest.mark.parametrize('relative', RUNS)
-def test_score_raw_population_contrasts_match_original_records(relative):
+def test_score_raw_population_contrasts_match_original_records(relative, recomputed_work):
     root = ROOT / 'results' / relative
     manifest = read(root / 'manifest.json')
     name = {'feedback_specificity_v2': 'DeepSeek/OFF',
             'feedback_specificity_thinking_384k_20260923': 'DeepSeek/ON',
             'qwen3_8/off': 'Qwen/OFF', 'qwen3_8/on': 'Qwen/ON'}[relative]
-    summary = read(ROOT / 'results/model_comparison_20260928/score_baseline_data_reproduct.json')['configurations'][name]
+    summary = read(recomputed_work / 'results/model_comparison_20260928/score_baseline_data_reproduct.json')['configurations'][name]
     records = [read(root / 'holdout' / (job['id'] + '.json')) for job in manifest['jobs']]
     for arm in ('accurate', 'mismatched'):
         values = []
@@ -65,8 +77,23 @@ def test_score_raw_population_contrasts_match_original_records(relative):
 
 
 @pytest.mark.parametrize('relative', RUNS)
+def test_optional_request_archive_preserves_frozen_prompts(relative):
+    root = ROOT / 'results' / relative
+    if not (root / 'requests_candidates').is_dir():
+        pytest.skip('Full API request provenance is optional in the paper-only export')
+    manifest = read(root / 'manifest.json')
+    assert {p.stem for p in (root / 'requests_candidates').glob('*.json')} == {j['id'] for j in manifest['jobs']}
+    for job in manifest['jobs']:
+        context = read(root / 'contexts' / (job['context'] + '.json'))
+        request = read(root / 'requests_candidates' / (job['id'] + '.json'))
+        assert request['prompt'] == context['prompts'][job['arm']]
+
+
+@pytest.mark.parametrize('relative', RUNS)
 def test_condition_data_logs_are_complete_and_preserve_original_records(relative):
     root = ROOT / 'results' / relative
+    if not (root / 'arm_logs').is_dir():
+        pytest.skip('Full condition logs are optional in the paper-only export')
     jobs = read(root / 'manifest.json')['jobs']
     for arm in ('score', 'accurate', 'mismatched'):
         with (root / 'arm_logs' / (arm + '.jsonl')).open(encoding='utf-8') as stream:
@@ -84,6 +111,8 @@ def test_condition_data_logs_are_complete_and_preserve_original_records(relative
 
 
 def test_reasoning_annotations_match_the_retained_on_requests():
+    if not (ROOT / 'results/mismatch_detection_jev').is_dir():
+        pytest.skip('JeV annotations are optional and are not current figure inputs')
     jobs = read(ROOT / 'results/feedback_specificity_thinking_384k_20260923/manifest.json')['jobs']
     identities = {j['id'] for j in jobs if j['arm'] in ('accurate', 'mismatched')}
     for folder in ['judgments', 'summaries']:
@@ -98,7 +127,7 @@ ANALYSIS_CHECKS = [
     ('results/feedback_specificity_v2/ANALYSIS.json', [('raw',), ('selected',), ('primary',)]),
     ('results/feedback_specificity_v2/role_analysis/ANALYSIS.json', [('summaries',)]),
     *[('results/feedback_specificity_thinking_384k_20260923/ANALYSIS.json', [(key,)])
-      for key in ('thinking', 'historical', 'focus_holm_two', 'configuration_differences_exploratory', 'audit')],
+      for key in ('thinking', 'historical', 'focus_holm_two', 'configuration_differences_exploratory')],
     *[(f'results/qwen3_8/{mode}/ANALYSIS.json', [('result',)]) for mode in ('off', 'on')],
     *[('results/figure4_opponent_profiles_20260926/ANALYSIS.json', [('configs', mode, 'summaries')])
       for mode in ('non_thinking', 'thinking')],
@@ -108,7 +137,33 @@ ANALYSIS_CHECKS = [
       for mode in ('off', 'on')
       for key in ('rows', 'distance_summary', 'distance_diagnostics', 'weak_mismatch_sensitivity')],
     ('results/model_comparison_20260928/cross_model_mainline_data.json', [('statistics',)]),
+    ('results/model_comparison_20260928/score_baseline_data.json', [('configurations',)]),
 ]
+
+
+@pytest.fixture(scope='session')
+def recomputed_work(tmp_path_factory):
+    """Reuse a completed offline run, or regenerate from only allowed paper files."""
+    expected = {ROOT / name for name, _ in ANALYSIS_CHECKS}
+    expected = {path.with_name(path.stem + '_reproduct' + path.suffix) for path in expected}
+    expected.update(ROOT / 'results/model_comparison_20260928' / (name + '_reproduct.csv')
+                    for name in ('candidate_gains', 'population_gains', 'condition_statistics'))
+    if all(path.is_file() for path in expected):
+        return ROOT
+    work = tmp_path_factory.mktemp('paper-only-analysis')
+    inputs = reproduce.paper_input_paths(ROOT) | reproduce.paper_reference_paths(ROOT)
+    for path in inputs:
+        target = work / path.relative_to(ROOT)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+    assert {p.relative_to(work) for p in work.rglob('*') if p.is_file()} == {
+        p.relative_to(ROOT) for p in inputs}
+    reproduce.preflight(work)
+    environment = dict(os.environ, PYTHONUTF8='1', PYTHONIOENCODING='utf-8', MPLBACKEND='Agg')
+    for step, command in reproduce.commands(work, work / 'results/reproduction/latest', 'analysis'):
+        result = subprocess.run(command, cwd=ROOT, env=environment, capture_output=True, text=True)
+        assert result.returncode == 0, f'{step}\n{result.stdout}\n{result.stderr}'
+    return work
 
 
 def assert_same_results(expected, actual):
@@ -128,9 +183,10 @@ def assert_same_results(expected, actual):
 
 
 @pytest.mark.parametrize('relative,branches', ANALYSIS_CHECKS)
-def test_recomputed_analyses_match_paper_statistics(relative, branches, record_property):
+def test_recomputed_analyses_match_paper_statistics(relative, branches, record_property, recomputed_work):
     path = ROOT / relative
-    original, recomputed = read(path), read(path.with_name(path.stem + '_reproduct' + path.suffix))
+    recomputed = recomputed_work / relative
+    original, recomputed = read(path), read(recomputed.with_name(path.stem + '_reproduct' + path.suffix))
     numbers = 0
     for branch in branches:
         before, after = original, recomputed
@@ -141,9 +197,18 @@ def test_recomputed_analyses_match_paper_statistics(relative, branches, record_p
 
 
 def test_paper_inputs_manifest_points_to_existing_files(record_property):
-    records = read(ROOT / 'results/reproduction/INPUT_MANIFEST.json')['records']
+    manifest = read(ROOT / 'results/reproduction/INPUT_MANIFEST.json')
+    records = manifest['records']
+    inputs, references = reproduce.paper_input_paths(ROOT), reproduce.paper_reference_paths(ROOT)
+    assert len(inputs) == manifest['figure_input_files'] == 3110
+    assert len(references) == manifest['paper_reference_files']
+    assert len(records) == manifest['unique_files'] == len(inputs | references)
+    assert {row['path'] for row in records} == {p.relative_to(ROOT).as_posix() for p in inputs | references}
     for row in records:
-        assert (ROOT / row['path']).is_file(), row['path']
+        path = ROOT / row['path']
+        assert path.is_file(), row['path']
+        assert path.stat().st_size == row['bytes'], row['path']
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == row['sha256'], row['path']
     record_property('inputs_verified', len(records))
 
 
@@ -152,9 +217,9 @@ def test_paper_inputs_manifest_points_to_existing_files(record_property):
     ('population_gains', 640),
     ('condition_statistics', 32),
 ])
-def test_recomputed_csv_preserves_full_precision_matching_reference(name, rows):
+def test_recomputed_csv_preserves_full_precision_matching_reference(name, rows, recomputed_work):
     import csv
-    path = ROOT / 'results/model_comparison_20260928' / (name + '_reproduct.csv')
+    path = recomputed_work / 'results/model_comparison_20260928' / (name + '_reproduct.csv')
     with path.open(encoding='utf-8', newline='') as handle:
         reader = csv.DictReader(handle)
         values = list(reader)
@@ -165,7 +230,10 @@ def test_recomputed_csv_preserves_full_precision_matching_reference(name, rows):
 
 
 def test_cached_label_report_matches_paper_counts():
-    report = read(ROOT / 'results/mismatch_detection_jev/jev_recount_reproduct.json')
+    path = ROOT / 'results/mismatch_detection_jev/jev_recount_reproduct.json'
+    if not path.is_file():
+        pytest.skip('Cached JeV report is optional and is not a current figure input')
+    report = read(path)
     assert report['threshold'] == .4 and report['confidence_gate'] == .6
     assert report['files_judged'] == 240
     assert all(report['by_arm'][arm]['files'] == 120 for arm in ('accurate', 'mismatched'))
@@ -176,7 +244,10 @@ def test_cached_label_report_matches_paper_counts():
 
 
 def test_sampled_replay_matches_recorded_games():
-    report = read(ROOT / 'results/reproduction/replay_reproduct.json')
+    path = ROOT / 'results/reproduction/replay_reproduct.json'
+    if not path.is_file():
+        pytest.skip('Game replay report is optional in the paper-only export')
+    report = read(path)
     assert report['games_replayed'] == 2640 and len(report['records']) == 12
     assert report['max_abs_error'] <= 1e-12 and report['live_api_calls'] == 0
     assert all(r['status'] in ('ok', 'invalid_candidate_no_game_replay') for r in report['records'])

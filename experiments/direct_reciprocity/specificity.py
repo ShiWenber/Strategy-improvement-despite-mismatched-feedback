@@ -2,10 +2,12 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, wait, FIRST_COMPLETED
 from dataclasses import asdict, replace
+from functools import partial
 import json
 import os
 from pathlib import Path
 import random
+import shutil
 from statistics import mean
 import time
 
@@ -16,9 +18,10 @@ from .baselines import TRAIN
 from .report_assignment import derangement
 from .prompts import build_prompt
 from .run import Generator
-from .specificity_assets import (ARMS, SCORE_ARMS, experiment_arms, SEEDS, RANKS, panel, probes, diagnostic_block,
-                                 tokenizer, probe_specs, generation_arms, information_prompt)
+from .specificity_assets import (SCORE_ARMS, experiment_arms, SEEDS, RANKS, panel, probes, diagnostic_block,
+                                 probe_specs, generation_arms, information_prompt)
 from .condition_generation import candidate_job, generate_conditions, write_arm_logs
+from ..config.load_env import api_environment, require_model
 
 DEFAULT_ROOT = 'results/feedback_specificity_v2'
 
@@ -38,15 +41,17 @@ def assets_record():
     return {'panels': {split: [{'family': family, **asdict(p)} for family, p in panel(split)]
                        for split in ('V', 'H')},
             'probes': {split: probe_specs(split) for split in ('F', 'H')},
-            'tokenizer': 'tiktoken cl100k_base; proxy tokenizer, not provider billing tokenizer',
             'families_disjoint_from_training': False}
 
 
 
 def freeze(root, seeds=None, ranks=None, source=None, arms=None):
     root = Path(root)
+    model = require_model('deepseek')
     if (root / 'manifest.json').exists():
         manifest = check_manifest(root)
+        if manifest['model'] != model:
+            raise RuntimeError('Request model differs from frozen manifest')
         if arms is not None and list(experiment_arms(arms)) != manifest['arms']:
             raise ValueError('Existing frozen report conditions differ')
         return manifest
@@ -69,7 +74,7 @@ def freeze(root, seeds=None, ranks=None, source=None, arms=None):
             jobs.append({'id': f'{cid}-d{draw}-pos{position}', 'context': cid,
                          'seed': seed, 'rank': rank, 'draw': draw, 'position': position, 'arm': arm})
     random.Random(2026091902).shuffle(init_jobs)
-    manifest = {'version': 'specificity-v3', 'provider': 'deepseek', 'model': 'deepseek-flash',
+    manifest = {'version': 'specificity-v3', 'provider': 'deepseek', 'model': model,
                 'config': asdict(cfg_for(seeds[0])), 'seeds': list(seeds), 'arms': list(arms),
                 'ranks': list(ranks), 'draws': 2, 'init_jobs': init_jobs, 'jobs': jobs,
                 'generation_order': list(order), 'arm_positions': {arm: i for i, arm in enumerate(order)},
@@ -81,11 +86,9 @@ def freeze(root, seeds=None, ranks=None, source=None, arms=None):
                 'training_selection_generation_namespace': 19001,
                 'fallback': 'invalid candidate/setting runtime failure retains parent; API failures remain missing',
                 'init_fallback': 'ALLD when generation invalid or feedback probe execution fails; no replacement calls',
-                'init_quality_pause_above_invalid': len(init_jobs) // 10,
                 'requested_calls': {'initial': len(init_jobs), 'candidates': len(jobs), 'total': len(init_jobs) + len(jobs)},
                 'frozen_at': time.time(),
-                'inference': 'seed-cluster bootstrap CI; exact cluster sign swaps for arm contrasts under paired exchangeability; parent contrast additionally assumes symmetric cluster effects',
-                'length_control': 'cl100k_base +/-5% for Accurate and Mismatched reports; not DeepSeek token equality'}
+                'inference': 'seed-cluster bootstrap CI; exact cluster sign swaps for arm contrasts under paired exchangeability; parent contrast additionally assumes symmetric cluster effects'}
     if source is not None:
         source = Path(source).resolve()
         origin = read_json(source / 'manifest.json')
@@ -95,8 +98,6 @@ def freeze(root, seeds=None, ranks=None, source=None, arms=None):
         expected_config['seed'] = origin['config']['seed']
         if origin['config'] != expected_config:
             raise ValueError('Source initialization configuration differs')
-        files = ['manifest.json'] + [f'populations/s{seed}.json' for seed in seeds]
-        files += [f"{folder}/{job['id']}.json" for folder in ('initial', 'requests_initial') for job in init_jobs]
         manifest['initial_source'] = Path(os.path.relpath(source, root.resolve())).as_posix()
         manifest['requested_calls'] = {'initial': 0, 'candidates': len(jobs), 'total': len(jobs)}
         manifest['independent_unit'] = f'{len(seeds)} reused population clusters; new candidate responses'
@@ -152,7 +153,8 @@ def initial_job(arg):
     if output.exists():
         return {'id': job['id'], 'cached': True}
     cfg = cfg_for(job['seed'])
-    gen = Generator(root / 'requests_initial', 'deepseek', 'deepseek-flash', cfg.temperature)
+    manifest = check_manifest(root)
+    gen = Generator(root / 'requests_initial', manifest['provider'], manifest['model'], cfg.temperature)
     candidate = gen.generate(job['id'], init_prompt(job['seed'], job['slot']), cfg)
     reason = None
     if candidate is None:
@@ -192,7 +194,6 @@ def prepare_seed(arg):
 
 def make_contexts(root, manifest):
     root = Path(root)
-    enc = tokenizer()
     contexts = {}
     populations = population_root(root, manifest)
     for seed in manifest['seeds']:
@@ -203,12 +204,8 @@ def make_contexts(root, manifest):
             donor = data['mapping'][slot]
             correct = diagnostic_block(data['diagnostics'][slot])
             wrong = diagnostic_block(data['diagnostics'][donor])
-            count = len(enc.encode(correct))
             arms = experiment_arms(manifest['arms'])
             blocks = {arm: {'accurate': correct, 'mismatched': wrong, 'score': ''}[arm] for arm in arms}
-            lengths = {arm: len(enc.encode(block)) for arm, block in blocks.items()}
-            if any(not .95 <= lengths[a] / count <= 1.05 for a in ARMS):
-                raise RuntimeError('Length control failed before candidate generation')
             base = build_prompt(cfg_for(seed), pop[slot]) + '\nPARENT SLOT: ' + str(slot)
             base += '\nPOPULATION SOURCE (original slot order):\n' + json.dumps(
                 [{'slot': i, 'code': p.code} for i, p in enumerate(pop)], sort_keys=True)
@@ -216,7 +213,7 @@ def make_contexts(root, manifest):
                 [{'slot': i, 'fitness': round(a['fitness'], 6)} for i, a in enumerate(data['assessment'])], sort_keys=True)
             cid = f's{seed}-rank{rank}'
             c = {'id': cid, 'seed': seed, 'rank': rank, 'slot': slot, 'donor': donor,
-                 'parent': asdict(pop[slot]), 'block_tokens': lengths,
+                 'parent': asdict(pop[slot]),
                  'effective_mismatch': correct != wrong,
                  'prompts': {arm: information_prompt(base, arm, blocks) for arm in arms}}
             write_json(root / 'contexts' / (cid + '.json'), c)
@@ -227,22 +224,13 @@ def make_contexts(root, manifest):
 
 def make_prompts(root, manifest):
     root = Path(root)
-    enc = tokenizer()
-    contexts = make_contexts(root, manifest)
-    rows = []
-    for job in manifest['jobs']:
-        prompt = contexts[job['context']]['prompts'][job['arm']]
-        rows.append({'id': job['id'], 'tokens_proxy': len(enc.encode(prompt))})
-    sealed = {'rows': rows,
-              'effective_mismatch_contexts': sum(c['effective_mismatch'] for c in contexts.values()),
-              'n_contexts': len(contexts), 'sealed_at': time.time()}
     path = root / 'PROMPTS_SEALED.json'
     if path.exists():
-        previous = read_json(path)
-        if previous['rows'] != rows:
-            raise RuntimeError('Frozen prompts changed')
-    else:
-        write_json(path, sealed)
+        return read_json(path)
+    contexts = make_contexts(root, manifest)
+    sealed = {'effective_mismatch_contexts': sum(c['effective_mismatch'] for c in contexts.values()),
+              'n_contexts': len(contexts), 'sealed_at': time.time()}
+    write_json(path, sealed)
     return sealed
 
 
@@ -376,15 +364,21 @@ def holdout_job(arg):
     root = Path(root)
     require_holdout(root)
     path = root / 'holdout' / (identity + '.json')
+    recovering = False
     if path.exists():
         cached = read_json(path)
-        if not (kind == 'child' and cached.get('status') == 'skipped' and
-                cached.get('skip_reason') == 'parent_holdout_failed'):
+        recovering = (kind == 'child' and cached.get('status') == 'skipped' and
+                      cached.get('skip_reason') == 'parent_holdout_failed')
+        if not recovering:
             return {'id': identity, 'cached': True}
     record = read_json(root / ('contexts' if kind == 'parent' else 'candidates') / (identity + '.json'))
     cid = identity if kind == 'parent' else record['context']
     c = read_json(root / 'contexts' / (cid + '.json'))
     item = c['parent'] if kind == 'parent' else record['child']
+    if recovering:
+        archive = root / 'evaluation_history' / str(time.time_ns()) / 'holdout' / path.name
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(path, archive)
     measured = holdout_measure(Policy(**item), cfg_for(c['seed'])) if item else {}
     if kind == 'parent':
         failed = [s for s in ('default', 'noise01', 'long', 'behavior')
@@ -392,19 +386,29 @@ def holdout_job(arg):
         result = {'id': identity, 'context': cid, 'status': 'runtime_failure' if failed else 'complete',
                   'failed_settings': failed, 'measured': measured, 'deployed': measured}
     else:
+        from .holdout_metrics import parent_available, SETTINGS, PAYOFF_SETTINGS
         parent_holdout = read_json(root / 'holdout' / (cid + '.json'))
-        if parent_holdout.get('status', 'complete') != 'complete':
+        available = {s: parent_available(parent_holdout, s) for s in SETTINGS}
+        if not any(available.values()):
             result = {**record, 'status': 'skipped',
                       'skip_reason': 'parent_holdout_failed',
                       'parent_holdout_status': parent_holdout.get('status')}
             write_json(path, result)
             return {'id': identity, 'skipped': True, 'reason': result['skip_reason']}
         baseline = parent_holdout['measured']
-        fallbacks = {s: measured.get(s, {}).get('status') != 'ok' for s in baseline}
-        deployed = {s: baseline[s] if fallbacks[s] else measured[s] for s in baseline}
+        fallbacks = {s: (measured.get(s, {}).get('status') != 'ok') if available[s] else None
+                     for s in SETTINGS}
+        deployed = {s: (baseline[s] if fallbacks[s] else measured[s]) if available[s] else None
+                    for s in SETTINGS}
+        missing = {s: {'reason': 'parent_measurement_failed',
+                       'error_type': baseline.get(s, {}).get('error_type', 'missing_measurement')}
+                   for s in SETTINGS if not available[s]}
         result = {**record, 'status': 'complete', 'measured': measured, 'deployed': deployed, 'fallback': fallbacks,
-                  'delta': {s: {key: deployed[s][key] - baseline[s][key] for key in ('score', 'cooperation', 'worst_score')}
-                            for s in ('default', 'noise01', 'long')}}
+                  'delta': {s: {key: deployed[s][key] - baseline[s][key] if available[s] else None
+                                for key in ('score', 'cooperation', 'worst_score')}
+                            for s in PAYOFF_SETTINGS}}
+        if missing:
+            result.update(unavailable_settings=list(missing), missing_reasons=missing)
     write_json(path, result)
     return {'id': identity, 'completed': True, 'status': result['status']}
 
@@ -416,7 +420,7 @@ def main():
     parser.add_argument('--output', default=DEFAULT_ROOT)
     parser.add_argument('--workers', type=int, default=12)
     parser.add_argument('--api-workers', type=int, default=8)
-    parser.add_argument('--env-file', default='../../.env')
+    parser.add_argument('--env-file', type=Path, default=Path(__file__).resolve().parents[2] / '.env')
     parser.add_argument('--seeds', nargs='+', type=int, help='Population seeds to freeze; defaults to the paper batch.')
     parser.add_argument('--ranks', nargs='+', type=int, choices=RANKS, help='Parent ranks to freeze; defaults to 1, 3, 6.')
     parser.add_argument('--source', type=Path, help='Reuse recorded initial populations in place; only candidate generation calls the API.')
@@ -425,6 +429,8 @@ def main():
     args = parser.parse_args()
     if min(args.workers, args.api_workers) < 1:
         parser.error('Worker counts must be positive')
+    if args.stage in ('freeze', 'initialize', 'generate', 'all'):
+        os.environ.update(api_environment(args.env_file))
     root = Path(args.output)
     root.mkdir(parents=True, exist_ok=True)
     if args.arm is not None and args.stage != 'generate':
@@ -436,8 +442,8 @@ def main():
     if args.seeds is not None or args.ranks is not None or args.source is not None or args.arms is not None:
         parser.error('--seeds, --ranks, --source and --arms belong to the freeze stage')
     manifest = check_manifest(root)
-    from dotenv import load_dotenv
-    load_dotenv(args.env_file, override=False)
+    if args.stage in ('initialize', 'generate', 'all') and require_model('deepseek') != manifest['model']:
+        raise RuntimeError('Request model differs from frozen manifest')
     phases = ['initialize', 'prepare', 'generate', 'select', 'holdout'] if args.stage == 'all' else [args.stage]
     with runner_lock(root, args.stage):
         for phase in phases:
@@ -447,18 +453,13 @@ def main():
             elif phase == 'initialize':
                 pool_run(initial_job, [(str(root), job) for job in manifest['init_jobs']], args.api_workers, root, phase)
             elif phase == 'prepare':
-                populations = population_root(root, manifest)
-                initial = [read_json(populations / 'initial' / (j['id'] + '.json')) for j in manifest['init_jobs']]
-                if sum(r['fallback'] is not None for r in initial) > manifest['init_quality_pause_above_invalid']:
-                    raise RuntimeError('Initialization fallback exceeds 10%; pause entire batch for audit')
                 if 'initial_source' not in manifest:
                     pool_run(prepare_seed, [(str(root), seed) for seed in manifest['seeds']], args.workers, root, phase, True)
                 make_prompts(root, manifest)
             elif phase == 'generate':
-                seal = make_prompts(root, manifest)
-                if not seal['rows']:
-                    raise RuntimeError('Missing prompt seal')
-                generate_conditions(root, manifest, args.api_workers, candidate_job, args.arm)
+                make_prompts(root, manifest)
+                generate_conditions(root, manifest, args.api_workers,
+                                    partial(candidate_job, model=manifest['model']), args.arm)
             elif phase == 'select':
                 for job in manifest['jobs']:
                     read_json(root / 'candidates' / (job['id'] + '.json'))

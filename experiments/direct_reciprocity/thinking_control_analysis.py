@@ -1,23 +1,22 @@
-"""Analyze only a complete, audited thinking follow-up against frozen historical outputs."""
+"""Analyze paired thinking follow-ups and shared historical records."""
 import argparse
 from collections import Counter
 from pathlib import Path
-from statistics import mean
 import json
 
 import numpy as np
 
-from .core import Policy
 from .records import read_json, write_json
 from .specificity import seal_selections
-from .specificity_analysis import contrast, summarize, holm, behavior_delta
+from .specificity_analysis import contrast, holm, aggregate_holdouts
 from .condition_generation import specification
+from .holdout_metrics import audit_deltas
 
 SOURCE = Path('results/feedback_specificity_v2')
 DEFAULT_ROOT = Path('results/feedback_specificity_thinking_384k_20260923')
 
 
-def audit(root, m, source=SOURCE):
+def audit(root, m):
     root = Path(root)
     issues, records = [], []
     complete = root / 'COMPLETE.json'
@@ -46,7 +45,7 @@ def audit(root, m, source=SOURCE):
         child = read_json(root/'candidates'/(identity+'.json'))
         row = read_json(root/'holdout'/(identity+'.json'))
         parent = read_json(root/'holdout'/(j['context']+'.json'))
-        expected = specification(c['prompts'][j['arm']], 'deepseek', 'on')
+        expected = specification(c['prompts'][j['arm']], 'deepseek', 'on', model=m['api']['model'])
         if any(r.get(k) != v for k,v in expected.items()):
             issues.append(identity+': request parameters differ')
         if r['started_at'] < m['frozen_at']:
@@ -63,61 +62,35 @@ def audit(root, m, source=SOURCE):
                 code = '\n'.join(code.strip().splitlines()[1:-1])
             if child['child']['code'] != code:
                 issues.append(identity+': code differs from returned content')
-        for setting in ('default','noise01','long'):
-            for metric in ('score','cooperation','worst_score'):
-                d = row['deployed'][setting][metric]-parent['measured'][setting][metric]
-                if abs(d-row['delta'][setting][metric]) > 1e-10:
-                    issues.append(identity+': delta arithmetic')
-                if row['fallback'][setting] and abs(d)>1e-10:
-                    issues.append(identity+': invalid fallback')
+        issues.extend(audit_deltas(row, parent, identity))
         records.append(r)
-    def tokens(key):
-        return sum((r.get('usage') or {}).get(key,0) or 0 for r in records)
-    reasoning_tokens = [(r.get('usage') or {}).get('completion_tokens_details',{}).get('reasoning_tokens')
-                        if (r.get('usage') or {}).get('completion_tokens_details') else None for r in records]
     archived = [read_json(p) for p in (root/'attempt_history').glob('*/requests_candidates/*.json')]
     return {'issues':issues, 'requests':len(records),
             'archived_attempts':len(archived),
-            'archived_attempts_usage_missing':sum(r.get('usage') is None for r in archived),
-            'archived_attempts_reported_total_tokens':sum((r.get('usage') or {}).get('total_tokens',0) or 0 for r in archived),
             'statuses':dict(Counter(r['status'] for r in records)),
             'returned_models':dict(Counter(r.get('returned_model') for r in records)),
             'finish_reasons':dict(Counter(r.get('finish_reason') for r in records)),
-            'usage_missing':sum(r.get('usage') is None for r in records),
-            'prompt_tokens':tokens('prompt_tokens'),'completion_tokens':tokens('completion_tokens'),
-            'total_tokens':tokens('total_tokens'),
-            'reasoning_tokens_reported':sum(v for v in reasoning_tokens if v is not None),
-            'reasoning_token_usage_missing':sum(v is None for v in reasoning_tokens),
             'reasoning_chars':sum(len(r['reasoning_content']) for r in records),
             'note':'Reasoning character counts are not tokens. This is a record and arithmetic audit, not an independent game implementation.'}
 
 
 def aggregate(root, m):
-    root = Path(root)
-    rows = [read_json(root/'holdout'/(j['id']+'.json')) for j in m['jobs']]
-    by_id = {r['id']:r for r in rows}
-    parents = {cid:read_json(root/'holdout'/(cid+'.json')) for cid in {j['context'] for j in m['jobs']}}
-    for row in rows:
-        row['behavior_delta'] = behavior_delta(row, parents[row['context']])
-    selected = read_json(root/'SELECTIONS_SEALED.json')['rows']
-    result = {'raw':{},'selected':{}}
-    for arm in m['arms']:
-        rr = [r for r in rows if r['arm']==arm]
-        metrics = {}
-        for setting in ('default','noise01','long'):
-            for metric in ('score','cooperation','worst_score'):
-                values = [mean(r['delta'][setting][metric] for r in rr if r['seed']==s) for s in m['seeds']]
-                metrics[setting+'/'+metric] = summarize(values)
-        behavior = {metric:summarize([mean(r['behavior_delta'][metric] for r in rr if r['seed']==s) for s in m['seeds']])
-                    for metric in rr[0]['behavior_delta']}
-        result['raw'][arm] = {'n':len(rr),'valid':sum(r['valid'] for r in rr),'metrics':metrics,'behavior':behavior,
-                             'fallbacks':{s:sum(r['fallback'][s] for r in rr) for s in ('default','noise01','long','behavior')}}
-        for rule in ('S1','S2','S3'):
-            choices = [r for r in selected if r['arm']==arm and r['rule']==rule]
-            sm = {setting:summarize([mean(by_id[r['winner']]['delta'][setting]['score'] if r['winner'] else 0.
-                                         for r in choices if r['seed']==s) for s in m['seeds']])
-                  for setting in ('default','noise01','long')}
-            result['selected'][rule+'/'+arm] = {'n':len(choices),'accepted':sum(r['accepted'] for r in choices), 'metrics':sm}
+    return aggregate_holdouts(root, m)
+
+
+def paired_metric_contrast(new, old, seeds):
+    """Pair available populations only after confirming matching parent contexts."""
+    if new.get('context_ids') != old.get('context_ids'):
+        raise ValueError('Configuration contrast requires the same evaluable parent contexts')
+    a = dict(zip(new.get('seed_ids', seeds), new['seed_values']))
+    b = dict(zip(old.get('seed_ids', seeds), old['seed_values']))
+    paired = [seed for seed in seeds if seed in a and seed in b]
+    result = contrast([a[seed] - b[seed] for seed in paired])
+    if 'seed_ids' in new:
+        result.update(seed_ids=paired, context_ids=new.get('context_ids', []),
+                      n_contexts=new.get('n_contexts'),
+                      missing_contexts=new.get('missing_contexts', []),
+                      missing_reasons=new.get('missing_reasons', {}))
     return result
 
 
@@ -136,38 +109,28 @@ def paired_focus(new, old):
     return out
 
 
-def analyze(root, source=SOURCE, source_analysis="ANALYSIS.json", output_suffix=""):
+def analyze(root, source=SOURCE, output_suffix=""):
     root, source = Path(root), Path(source)
     m = read_json(root / 'manifest.json')
-    aud = audit(root,m,source)
-    write_json(root/f'AUDIT{output_suffix}.json',aud)
-    if aud['issues']: raise RuntimeError('Audit failed; do not interpret results')
     new, old = aggregate(root,m), aggregate(source,m)
-    old_saved = read_json(source/source_analysis)
-    for arm in m['arms']:
-        for setting in ('default','noise01','long'):
-            x = old['raw'][arm]['metrics'][setting+'/score']['seed_values']
-            y = old_saved['raw'][arm]['metrics'][setting+'/score']['seed_values']
-            if not np.allclose(x,y,atol=1e-12,rtol=0):
-                raise RuntimeError('Historical reconstruction mismatch')
     focus = paired_focus(new,old)
     exploratory = {}
     for arm in m['arms']:
         for setting in ('default','noise01','long'):
-            x = new['raw'][arm]['metrics'][setting+'/score']['seed_values']
-            y = old['raw'][arm]['metrics'][setting+'/score']['seed_values']
-            exploratory['raw/'+arm+'/'+setting] = contrast(np.asarray(x)-np.asarray(y))
+            exploratory['raw/'+arm+'/'+setting] = paired_metric_contrast(
+                new['raw'][arm]['metrics'][setting+'/score'],
+                old['raw'][arm]['metrics'][setting+'/score'], m['seeds'])
             for rule in ('S1','S2','S3'):
-                x = new['selected'][rule+'/'+arm]['metrics'][setting]['seed_values']
-                y = old['selected'][rule+'/'+arm]['metrics'][setting]['seed_values']
-                exploratory[rule+'/'+arm+'/'+setting] = contrast(np.asarray(x)-np.asarray(y))
+                exploratory[rule+'/'+arm+'/'+setting] = paired_metric_contrast(
+                    new['selected'][rule+'/'+arm]['metrics'][setting],
+                    old['selected'][rule+'/'+arm]['metrics'][setting], m['seeds'])
     limitation = ('历史配对配置比较：同时改变原生 thinking、输出预算及有效采样规则，非同期随机化，'
                   '服务端别名无法保证权重固定；H 是已使用过的测试面板。不能单独归因于思考开关，未显著不等于等效。')
-    result = {'audit':aud, 'thinking':new, 'historical':old, 'focus_holm_two':focus,
+    result = {'thinking':new, 'historical':old, 'focus_holm_two':focus,
               'configuration_differences_exploratory':exploratory, 'limitations':limitation,
               }
     write_json(root/f'ANALYSIS{output_suffix}.json',result)
-    print(json.dumps({'audit_issues':aud['issues'],'focus':focus},ensure_ascii=False))
+    print(json.dumps({'focus':focus},ensure_ascii=False))
     return result
 
 
@@ -175,7 +138,17 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('root',nargs='?',default=str(DEFAULT_ROOT))
     parser.add_argument('--source', type=Path, default=SOURCE, help='Shared OFF parent records.')
-    parser.add_argument('--source-analysis', default='ANALYSIS.json')
     parser.add_argument('--output-suffix', default='')
+    parser.add_argument('--audit-only', action='store_true', help='Run the optional record audit instead of analysis.')
+    parser.add_argument('--audit-output', type=Path, help='Explicit destination for the optional audit JSON.')
     args = parser.parse_args()
-    analyze(args.root, args.source, args.source_analysis, args.output_suffix)
+    if args.audit_only:
+        if args.audit_output is None:
+            parser.error('--audit-only requires --audit-output')
+        result = audit(args.root, read_json(Path(args.root) / 'manifest.json'))
+        write_json(args.audit_output, result)
+        print(json.dumps(result, ensure_ascii=False))
+    else:
+        if args.audit_output is not None:
+            parser.error('--audit-output requires --audit-only')
+        analyze(args.root, args.source, args.output_suffix)

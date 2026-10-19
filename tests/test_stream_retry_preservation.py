@@ -81,7 +81,7 @@ def fake_transport(monkeypatch, failures, client_options=None):
 def run_stream(root, retries=3):
     spec = generation.specification('offline fixture', 'qwen', 'on', model='offline-fixture')
     return generation.streamed_program(root, {'id': 'candidate'}, spec, Config(rounds=1),
-                                       require_reasoning=True, api_retries=retries)
+                                       api_retries=retries)
 
 
 def test_transport_and_rate_limit_retries_preserve_every_attempt(tmp_path, monkeypatch):

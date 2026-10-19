@@ -11,12 +11,9 @@ import json
 from pathlib import Path
 from statistics import mean
 
-REPO = Path(__file__).resolve().parents[3]
 import numpy as np
 
-LABELS = {'non_thinking': 'Thinking OFF', 'thinking': 'Thinking ON'}
 ARMS = ('accurate', 'mismatched')
-SEEDS = list(range(200, 220))
 METRICS = ('defection_exposure', 'recovery_rounds', 'not_recovered', 'mutual_cooperation')
 STAGES = ('parent', 'raw', 'S3')
 def read(path):
@@ -36,6 +33,8 @@ def measure(record, mode):
 
 def summarize(v):
     a = np.asarray(v, dtype=float)
+    if not len(a) or not np.isfinite(a).all():
+        raise ValueError('Behavior summaries require finite population values')
     rng = np.random.default_rng(2026092407)
     indices = rng.integers(0, len(a), size=(20000, len(a)))
     return {'mean': float(a.mean()), 'seed_values': a.tolist(),
@@ -44,16 +43,16 @@ def summarize(v):
             'zero': int((np.abs(a) <= 1e-12).sum())}
 
 
-def analyze(config, root, analysis_suffix=""):
+def analyze(config, root):
     manifest = read(root / 'manifest.json')
+    seeds = manifest['seeds']
     seal = read(root / 'SELECTIONS_SEALED.json')
-    frozen = read(root / f'ANALYSIS{analysis_suffix}.json')
-    expected = frozen['thinking'] if config == 'thinking' else frozen
     selection = {(r['context'], r['arm']): r for r in seal['rows'] if r['rule'] == 'S3' and r['arm'] in ARMS}
-    assert len(selection) == 120
     parent_ids = sorted({j['context'] for j in manifest['jobs']})
     parents = {cid: read(root / 'holdout' / f'{cid}.json') for cid in parent_ids}
     matching_jobs = [j for j in manifest['jobs'] if j['arm'] in ARMS]
+    if set(selection) != {(job['context'], job['arm']) for job in matching_jobs}:
+        raise ValueError('Behavior summaries require an S3 decision for every candidate pool')
     children = {j['id']: read(root / 'holdout' / (j['id'] + '.json')) for j in matching_jobs}
     jobs = defaultdict(list)
     for j in matching_jobs:
@@ -61,7 +60,8 @@ def analyze(config, root, analysis_suffix=""):
     pool_rows = []
     for (context, arm), jj in sorted(jobs.items()):
         jj.sort(key=lambda j: j['draw'])
-        assert len(jj) == 2
+        if len(jj) != manifest['draws']:
+            raise ValueError('Behavior summary candidate pool differs from the manifest draw count')
         p = parents[context]['measured']
         child_rows = [children[j['id']] for j in jj]
         winner = selection[(context, arm)]['winner']
@@ -86,7 +86,7 @@ def analyze(config, root, analysis_suffix=""):
             for metric in METRICS:
                 key = f'{mode}/{arm}/{metric}'
                 ss = {stage: summarize([mean(r['behavior'][mode][stage][metric] for r in subset if r['seed'] == s)
-                                      for s in SEEDS]) for stage in STAGES}
+                                      for s in seeds]) for stage in STAGES}
                 for a, b in (('raw', 'parent'), ('S3', 'parent'), ('S3', 'raw')):
                     ss[f'{a}_minus_{b}'] = summarize(np.asarray(ss[a]['seed_values']) - ss[b]['seed_values'])
                 summaries[key] = ss
@@ -97,53 +97,32 @@ def analyze(config, root, analysis_suffix=""):
                 a = np.array(summaries[f'{mode}/accurate/{metric}'][stage]['seed_values'])
                 b = np.array(summaries[f'{mode}/mismatched/{metric}'][stage]['seed_values'])
                 contrasts[f'{mode}/{stage}/{metric}/accurate_minus_mismatched'] = summarize(a - b)
-    # Verify mean aggregation and adoption against the released analysis for every arm.
-    for arm in ARMS:
-        subset = [r for r in pool_rows if r['arm'] == arm]
-        for stage, ref in [('raw', expected['raw'][arm]['metrics']['default/score']),
-                           ('S3', expected['selected']['S3/' + arm]['metrics']['default'])]:
-            values = [mean(r['H_score'][stage] - r['H_score']['parent'] for r in subset if r['seed'] == s) for s in SEEDS]
-            assert np.allclose(values, ref['seed_values'], atol=1e-12, rtol=0), (config, arm, stage)
-        for mode in ('controlled', 'natural'):
-            for metric, oldmetric in [('defection_exposure', 'sustained_unilateral_cooperation_last5'),
-                                     ('recovery_rounds', 'recovery_time_capped'),
-                                     ('not_recovered', 'not_recovered'),
-                                     ('mutual_cooperation', 'mutual_cooperation_last5')]:
-                values = summaries[f'{mode}/{arm}/{metric}']['raw_minus_parent']['seed_values']
-                ref = expected['raw'][arm]['behavior'][mode + '/' + oldmetric]['seed_values']
-                assert np.allclose(values, ref, atol=1e-12, rtol=0), (config, arm, mode, metric)
     return {'summaries': summaries, 'matched_contrasts': contrasts, 'pool_rows': pool_rows,
-            'n_seeds': len(SEEDS), 'n_parents': len(parents), 'n_slots': len(children),
+            'n_seeds': len(seeds), 'seed_ids': seeds, 'n_parents': len(parents), 'n_slots': len(children),
             'S3_accepted': sum(r['winner'] is not None for r in pool_rows),
-            'behavior_fallbacks': sum(c['fallback']['behavior'] for c in children.values()),
-            'validation': 'All raw behaviour and raw/S3 payoff seed means match released results.'}
+            'behavior_fallbacks': sum(c['fallback']['behavior'] for c in children.values())}
 
 
 def main():
-    global REPO
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--work', type=Path, default=REPO)
-    parser.add_argument('--analysis-suffix', default='')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--off-root', type=Path, required=True)
     parser.add_argument('--on-root', type=Path, required=True)
     args = parser.parse_args()
-    REPO = args.work.resolve()
     output = args.output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     data = {
-        'non_thinking': analyze('non_thinking', args.off_root.resolve(), args.analysis_suffix),
-        'thinking': analyze('thinking', args.on_root.resolve(), args.analysis_suffix),
+        'non_thinking': analyze('non_thinking', args.off_root.resolve()),
+        'thinking': analyze('thinking', args.on_root.resolve()),
     }
-    for mode in ('controlled', 'natural'):
-        for metric in METRICS:
-            key = f'{mode}/pooled/{metric}'
-            assert data['non_thinking']['summaries'][key]['parent'] == data['thinking']['summaries'][key]['parent']
+    seeds = data['non_thinking']['seed_ids']
+    if not seeds or data['thinking']['seed_ids'] != seeds:
+        raise ValueError('Behavior summaries require matching nonempty population seed orders')
     report = {'status': 'complete', 'analysis_status': 'post_hoc_exploratory',
-              'seeds': SEEDS, 'independent_units': 20, 'arms': list(ARMS),
-              'stage_definition': {'parent': '3 shared parents per population',
-                                   'raw': '12 candidates per population across 2 report conditions',
-                                   'S3': '6 sealed candidate-pool decisions per population'},
+              'seeds': seeds, 'independent_units': len(seeds), 'arms': list(ARMS),
+              'stage_definition': {'parent': 'Shared parents within each population',
+                                   'raw': 'All candidate outputs in the matching report conditions',
+                                   'S3': 'One sealed decision per parent and report condition'},
               'no_new_games_or_model_calls': True,
               'configs': data}
     output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')

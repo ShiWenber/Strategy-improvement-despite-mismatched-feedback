@@ -88,6 +88,30 @@ def get_model(provider: str, explicit: str | None = None) -> str:
     return _DEFAULT_MODELS.get(provider, "")
 
 
+def api_environment(env_file: str | Path, environ=None) -> dict[str, str]:
+    """Return a child environment with the selected .env taking precedence.
+
+    Do not mutate the caller's environment. Empty model settings stay empty so
+    a missing configuration cannot silently select a different model.
+    """
+    from dotenv import dotenv_values
+
+    environment = dict(os.environ if environ is None else environ)
+    environment.update({name: value if value is not None else ""
+                        for name, value in dotenv_values(env_file, encoding="utf-8-sig").items()})
+    return environment
+
+
+def require_model(provider: str, environ=None) -> str:
+    """Read an explicitly configured API model, without a built-in fallback."""
+    name = provider.upper() + "_MODEL"
+    value = (os.environ if environ is None else environ).get(name, "")
+    model = value.strip() if isinstance(value, str) else ""
+    if not model:
+        raise ValueError(f"Missing model configuration: set {name} in .env or the environment")
+    return model
+
+
 def require_api_key(provider: str) -> str:
     """Like get_api_key but raises a clear error if missing."""
     key = get_api_key(provider)

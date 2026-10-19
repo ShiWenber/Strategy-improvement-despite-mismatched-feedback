@@ -9,26 +9,42 @@ from experiments.direct_reciprocity.figures import plot_results_three_figures as
 from experiments.direct_reciprocity.records import write_json
 
 
-@pytest.mark.parametrize('provider,default,override', [
-    ('qwen', 'qwen3.8-flash', 'qwen3.7-flash'),
-    ('deepseek', 'deepseek-flash', 'deepseek-other'),
+@pytest.fixture(autouse=True)
+def isolate_model_environment(monkeypatch):
+    for name in ('DEEPSEEK_MODEL', 'QWEN_MODEL'):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.parametrize('provider,frozen,override', [
+    ('qwen', 'archived-qwen-fixture', 'configured-qwen-fixture'),
+    ('deepseek', 'archived-deepseek-fixture', 'configured-deepseek-fixture'),
 ])
-def test_model_resolution_preserves_defaults_and_accepts_frozen_identity(monkeypatch, provider, default, override):
+def test_model_resolution_requires_configuration_and_accepts_frozen_identity(monkeypatch, provider, frozen, override):
     env_name = provider.upper() + '_MODEL'
-    monkeypatch.delenv(env_name, raising=False)
-    assert generation.specification('prompt', provider, 'off')['model'] == default
+    with pytest.raises(ValueError, match=env_name):
+        generation.specification('prompt', provider, 'off')
+    assert generation.specification('prompt', provider, 'on', model=frozen)['model'] == frozen
     monkeypatch.setenv(env_name, override)
     assert generation.specification('prompt', provider, 'off')['model'] == override
-    assert generation.specification('prompt', provider, 'on', model=default)['model'] == default
+    assert generation.specification('prompt', provider, 'on', model='  ' + frozen + '  ')['model'] == frozen
+
+
+@pytest.mark.parametrize('model', ['', '   '])
+def test_explicit_blank_model_does_not_fall_back_to_environment(monkeypatch, model):
+    monkeypatch.setenv('QWEN_MODEL', 'configured-qwen-fixture')
+    with pytest.raises(ValueError):
+        generation.specification('prompt', 'qwen', 'off', model=model)
 
 
 def test_paired_manifest_version_tracks_requested_qwen_model(monkeypatch):
     monkeypatch.setenv('QWEN_MODEL', 'qwen3.7-flash')
     mode, _, api, version = paired_control.settings('qwen', Path('reproduction/qwen3_8/off'))
     assert (mode, api['model'], version) == ('off', 'qwen3.7-flash', 'qwen3.7-flash-v2')
-    monkeypatch.delenv('QWEN_MODEL')
-    assert paired_control.settings('qwen', Path('results/qwen3_8/on'))[-1] == 'qwen3.8-flash-v2'
-    assert paired_control.settings('deepseek', Path('reproduction/thinking'))[-1] == 'thinking-384k-v2'
+    monkeypatch.setenv('QWEN_MODEL', 'another-qwen-fixture')
+    assert paired_control.settings('qwen', Path('results/qwen3_8/on'))[-1] == 'another-qwen-fixture-v2'
+    monkeypatch.setenv('DEEPSEEK_MODEL', 'configured-deepseek-fixture')
+    _, _, api, version = paired_control.settings('deepseek', Path('reproduction/thinking'))
+    assert api['model'] == 'configured-deepseek-fixture' and version == 'thinking-384k-v2'
 
 
 def write_audit_fixture(root, provider, mode, model):
@@ -58,7 +74,6 @@ def test_offline_audits_use_manifest_model_despite_environment(tmp_path, monkeyp
     monkeypatch.setenv(provider.upper() + '_MODEL', 'unrelated-model')
     if provider == 'qwen':
         report = qwen_analysis.audit(tmp_path, manifest)
-        assert report['reported_cost_cny_uncached_beijing'] is None
     else:
         monkeypatch.setattr(thinking_control_analysis, 'seal_selections', lambda *args, **kwargs: {'rows': [{}, {}, {}]})
         report = thinking_control_analysis.audit(tmp_path, manifest)
@@ -69,14 +84,36 @@ def test_offline_audits_use_manifest_model_despite_environment(tmp_path, monkeyp
 def test_qwen_summary_records_manifest_model_and_rejects_mixed_pair(tmp_path, monkeypatch):
     for mode in ('off', 'on'):
         write_json(tmp_path / mode / 'manifest.json', {'api': {'model': 'qwen3.7-flash'}})
-    monkeypatch.setattr(qwen_analysis, 'audit', lambda *args: {'issues': []})
+    monkeypatch.setattr(qwen_analysis, 'audit', lambda *args: pytest.fail('Normal analysis must not run optional audits'))
     report = {'raw': {arm: {'metrics': {'default/score': {'seed_values': values}}}
                       for arm, values in [('accurate', [.1, .2]), ('mismatched', [.0, .0])]}}
     monkeypatch.setattr(qwen_analysis, 'aggregate', lambda *args: report)
-    assert qwen_analysis.analyze(tmp_path)['model'] == 'qwen3.7-flash'
+    result = qwen_analysis.analyze(tmp_path)
+    assert result['model'] == 'qwen3.7-flash'
+    assert all(set(payload) == {'result'} for payload in result['modes'].values())
+    assert not list(tmp_path.rglob('AUDIT*.json'))
     write_json(tmp_path / 'on/manifest.json', {'api': {'model': 'qwen3.8-flash'}})
     with pytest.raises(ValueError, match='same model'):
         qwen_analysis.analyze(tmp_path)
+
+
+def test_thinking_analysis_does_not_require_audit_or_saved_historical_summary(tmp_path, monkeypatch):
+    arms, settings = ('accurate', 'mismatched'), ('default', 'noise01', 'long')
+    write_json(tmp_path / 'manifest.json', {'arms': list(arms), 'seeds': [1, 2]})
+    def metric(arm):
+        return {'seed_values': [.1, .2] if arm == 'accurate' else [0., 0.]}
+    result = {
+        'raw': {arm: {'metrics': {setting + '/score': metric(arm) for setting in settings}} for arm in arms},
+        'selected': {rule + '/' + arm: {'metrics': {setting: metric(arm) for setting in settings}}
+                     for rule in ('S1', 'S2', 'S3') for arm in arms},
+    }
+    monkeypatch.setattr(thinking_control_analysis, 'audit',
+                        lambda *args: pytest.fail('Normal analysis must not run optional audits'))
+    monkeypatch.setattr(thinking_control_analysis, 'aggregate', lambda *args: result)
+    output = thinking_control_analysis.analyze(tmp_path, tmp_path / 'source')
+    assert output['thinking'] == result and output['historical'] == result
+    assert 'audit' not in output
+    assert not list(tmp_path.rglob('AUDIT*.json'))
 
 
 def test_plot_labels_use_recorded_models_before_environment(monkeypatch):

@@ -3,13 +3,9 @@
 Pipeline
 --------
 1. **Extract** each Thinking-ON `reasoning_content` with `deepseek-flash`.
-   A trace runs to ~150k+ characters, far past Jev's per-request budget, so the
-   extractor returns *verbatim quotes* about where the report came from rather
+   The extractor returns *verbatim quotes* about where the report came from rather
    than a prose summary (a prose summary loses the signal).
-2. **Fit** the merged extraction into the Jev budget (32,768 tokens for `state`
-   plus the longest question; ~3.3 chars/token, and `cl100k_base` under-counts
-   Jev by ~7%), merging once more if needed.
-3. **Judge** with Jev (`jev-latest`) using two three-level :class:`Choice`
+2. **Judge** with Jev (`jev-latest`) using two three-level :class:`Choice`
    questions over the same state:
 
        origin      questions_its_origin / accepts_as_labelled / silent
@@ -18,16 +14,16 @@ Pipeline
    Choice rather than a yes/no probability because it separates "silently kept
    using it" from "explicitly accepted it as mine", returns `confidence` and
    the full distribution, and needs no arbitrary cut point.
-4. **Summarize** cached judgments as JSON with per-condition rates and probabilities.
+3. **Summarize** cached judgments as JSON with per-condition rates and probabilities.
 
 The condition label is never placed in `state`; only the report block the model
 actually saw, plus the extraction. Otherwise the judgment leaks.
 
 Usage
 -----
-    python -m experiments.direct_reciprocity.judge_mismatch_detection_summary prep
-    python -m experiments.direct_reciprocity.judge_mismatch_detection_summary run --workers 16
-    python -m experiments.direct_reciprocity.judge_mismatch_detection_summary report
+    uv run python -m experiments.direct_reciprocity.judge_mismatch_detection_summary prep
+    uv run python -m experiments.direct_reciprocity.judge_mismatch_detection_summary run --workers 16
+    uv run python -m experiments.direct_reciprocity.judge_mismatch_detection_summary report
 """
 from __future__ import annotations
 
@@ -56,9 +52,6 @@ JEV_MODEL = 'jev-latest'
 SUMMARY_MODEL = os.environ.get('DEEPSEEK_MODEL', 'deepseek-flash')
 SUMMARY_BASE = os.environ.get('DEEPSEEK_API_BASE', 'https://api.deepseek.com')
 
-JEV_STATE_TOKEN_BUDGET = 18_000   # leaves room for the questions inside 32,768
-JEV_TOKEN_SAFETY = 1.07           # cl100k under-counts Jev
-MAX_MERGE_ROUNDS = 3
 RETRIES = 4
 
 ORIGIN_LEVELS = ('questions_its_origin', 'accepts_as_labelled', 'silent')
@@ -91,22 +84,6 @@ class Job:
 # ---------------------------------------------------------------------------
 # Environment / clients
 # ---------------------------------------------------------------------------
-
-_ENC = None
-
-
-def encoding():
-    global _ENC
-    if _ENC is None:
-        import tiktoken
-        _ENC = tiktoken.get_encoding('cl100k_base')
-    return _ENC
-
-
-def jev_tokens(text: str) -> int:
-    """Estimated Jev token count for `text` (cl100k scaled by the measured ratio)."""
-    return int(len(encoding().encode(text)) * JEV_TOKEN_SAFETY) + 1
-
 
 def deepseek_client():
     from openai import OpenAI
@@ -175,42 +152,14 @@ def gold_label(job: Job, trace: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Step 1-2: extract (map), merge (reduce), then verify length
+# Step 1: extract provenance statements
 # ---------------------------------------------------------------------------
 
-def chunk_text(text: str, size: int, overlap: int) -> list[str]:
-    """Split on line boundaries, carrying `overlap` characters between parts.
-
-    The overlap keeps a sentence that straddles a boundary whole in at least
-    one part.
-    """
-    if len(text) <= size:
-        return [text]
-    lines = text.splitlines(keepends=True)
-    parts: list[str] = []
-    current: list[str] = []
-    length = 0
-    for line in lines:
-        if length + len(line) > size and current:
-            parts.append(''.join(current))
-            tail = ''.join(current)
-            carry = tail[-overlap:] if overlap > 0 else ''
-            if '\n' in carry:
-                carry = carry[carry.index('\n') + 1:]
-            current = [carry] if carry else []
-            length = len(carry)
-        current.append(line)
-        length += len(line)
-    if current:
-        parts.append(''.join(current))
-    return parts
-
-
 SUMMARY_SYSTEM = (
-    'You extract, not summarise. You are given one PART of a model\'s private reasoning trace. '
+    'You extract, not summarise. You are given a model\'s private reasoning trace. '
     'A separate judge will later decide whether the reasoning noticed that the behavioural report it '
     'was given does not describe the strategy it is labelled with.\n\n'
-    'Your ONLY job is to report what this part of the trace says about the report and about the '
+    'Your ONLY job is to report what the trace says about the report and about the '
     'strategy being revised. Use this exact output template and nothing else:\n\n'
     'ORIGIN: <verbatim quotes of any sentence that questions which policy/strategy/parent produced '
     'the report, measurement or numbers. Copy the sentence exactly, inside double quotes. If none, '
@@ -225,20 +174,20 @@ SUMMARY_SYSTEM = (
     '- Quote VERBATIM. Do not paraphrase, soften, or interpret quotes.\n'
     '- Capture hesitant, mid-sentence, or self-doubting phrasings. A sentence that raises the idea '
     'as a question, or that says "or I am misinterpreting", still counts as ORIGIN.\n'
-    '- Do not decide whether the report is actually wrong. Report only what this part says.\n'
-    '- Never write NONE unless you searched the whole part. Missing a sentence is a failure.'
+    '- Do not decide whether the report is actually wrong. Report only what the trace says.\n'
+    '- Never write NONE unless you searched the whole trace. Missing a sentence is a failure.'
 )
 
 SUMMARY_USER = (
     'BEHAVIOURAL REPORT GIVEN TO THE MODEL (labelled as this strategy\'s own measured behaviour):\n'
     '---\n{block}\n---\n\n'
-    'PART {index} of {total} of the REASONING TRACE ({chars} characters in this part):\n'
+    'REASONING TRACE:\n'
     '---\n{trace}\n---\n\n'
-    'Fill in the template for this part only.'
+    'Fill in the template for this trace.'
 )
 
 
-def _call_summary(client, system: str, user: str) -> tuple[str, dict]:
+def _call_summary(client, system: str, user: str) -> str:
     for attempt in range(RETRIES):
         try:
             resp = client.chat.completions.create(
@@ -249,63 +198,25 @@ def _call_summary(client, system: str, user: str) -> tuple[str, dict]:
                 max_tokens=2500,
                 extra_body={'thinking': {'type': 'disabled'}},
             )
-            usage = resp.usage.model_dump() if resp.usage else {}
-            return resp.choices[0].message.content or '', usage
+            return resp.choices[0].message.content or ''
         except Exception as exc:  # noqa: BLE001
             if attempt == RETRIES - 1:
                 raise
             wait = min(30, 2 ** attempt)
             print(f'    summary retry in {wait}s: {type(exc).__name__}: {str(exc)[:110]}', flush=True)
             time.sleep(wait)
-    return '', {}
-
-
-# Map phase: one extractor call per part. 40k chars (~12k tokens) keeps each
-# part small enough that the extractor cannot skim past a single hesitant
-# sentence -- a single pass over a whole trace demonstrably loses them.
-PART_CHARS = 40_000
-PART_OVERLAP = 2_000
+    return ''
 
 
 def extract_trace(client, trace: str, block: str) -> dict:
-    """Map-reduce extraction of provenance statements, then fit the Jev budget.
-
-    Map: ask for verbatim quotes from each part.
-    Reduce: concatenate the extractions (they are short and additive) and merge
-    only if the combined text still exceeds the budget.
-    """
-    parts = chunk_text(trace, PART_CHARS, PART_OVERLAP)
-    usage_total = {'prompt_tokens': 0, 'completion_tokens': 0}
-    extractions: list[str] = []
-    for index, part in enumerate(parts):
-        user = SUMMARY_USER.format(block=block or '(no report block was shown)',
-                                   index=index + 1, total=len(parts),
-                                   chars=len(part), trace=part)
-        text, usage = _call_summary(client, SUMMARY_SYSTEM, user)
-        for key in usage_total:
-            usage_total[key] += usage.get(key, 0) or 0
-        if text.strip():
-            extractions.append(f'--- PART {index + 1}/{len(parts)} ---\n{text.strip()}')
-
-    current = '\n\n'.join(extractions).strip()
-    merge_system = (SUMMARY_SYSTEM.split('Your ONLY job')[0] +
-                    'You are now MERGING several partial extractions of ONE trace. Merge them into a '
-                    'single extraction using the same template. Keep EVERY verbatim quote exactly as '
-                    'written, including duplicates; drop only repeated strategy description.')
-    for _ in range(MAX_MERGE_ROUNDS):
-        if jev_tokens(current) <= JEV_STATE_TOKEN_BUDGET:
-            break
-        merged, usage = _call_summary(client, merge_system, current)
-        for key in usage_total:
-            usage_total[key] += usage.get(key, 0) or 0
-        current = merged.strip()
-
-    return {'summary': current, 'usage': usage_total, 'parts': len(parts),
-            'fits': jev_tokens(current) <= JEV_STATE_TOKEN_BUDGET}
+    """Extract provenance statements from the complete reasoning trace."""
+    user = SUMMARY_USER.format(block=block or '(no report block was shown)', trace=trace)
+    text = _call_summary(client, SUMMARY_SYSTEM, user)
+    return {'summary': text.strip()}
 
 
 # ---------------------------------------------------------------------------
-# Step 3: judge with Jev
+# Step 2: judge with Jev
 # ---------------------------------------------------------------------------
 
 def build_questions():
@@ -373,7 +284,6 @@ def judge_summary(summary: str, block: str) -> dict:
             return {
                 'ok': True,
                 'model': resp.model,
-                'input_tokens': resp.usage.input_tokens,
                 'origin_choice': origin.choice,
                 'origin_confidence': float(origin.confidence),
                 'origin_prob_questions': probs['questions_its_origin'],
@@ -419,12 +329,6 @@ def process(job: Job, force: bool = False) -> dict:
     payload = {
         'job_id': job.job_id, 'context': job.context, 'arm': job.arm, 'draw': job.draw,
         'status': record.get('status'),
-        'trace_chars': len(trace),
-        'summary_chars': len(summ['summary']),
-        'summary_jev_tokens': jev_tokens(summ['summary']),
-        'summary_fits': summ['fits'],
-        'summary_parts': summ['parts'],
-        'summary_usage': summ['usage'],
         **verdict,
     }
     cache.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding='utf-8')
@@ -444,7 +348,6 @@ def run(jobs: list[Job], workers: int, force: bool = False) -> None:
                 prob = row.get('origin_prob_questions')
                 prob_text = '  —  ' if prob is None else f'{prob:.2f}'
                 print(f'[{done}/{len(jobs)}] {job.job_id:24s} {job.arm:12s} '
-                      f'sum={row.get("summary_chars", 0):5d}ch '
                       f'{prob_text} {label}', flush=True)
             except Exception as exc:  # noqa: BLE001
                 print(f'[{done}/{len(jobs)}] FAIL {job.job_id}: {type(exc).__name__}: {exc}', flush=True)
@@ -460,20 +363,16 @@ def load_judgments(directory=None) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def cmd_prep(_args) -> None:
-    rows = []
-    for job in load_jobs():
-        trace = load_record(job.job_id).get('reasoning_content') or ''
-        rows.append({'job_id': job.job_id, 'arm': job.arm, 'trace_chars': len(trace),
-                     'trace_jev_tokens_est': jev_tokens(trace)})
+    rows = [{'job_id': job.job_id, 'arm': job.arm} for job in load_jobs()]
+    OUT.mkdir(parents=True, exist_ok=True)
     (OUT / 'plan.json').write_text(json.dumps(
         {'run': str(RUN), 'jev_model': JEV_MODEL, 'summary_model': SUMMARY_MODEL,
-         'jev_state_token_budget': JEV_STATE_TOKEN_BUDGET, 'files': rows}, indent=2),
+         'files': rows}, indent=2),
         encoding='utf-8')
     by_arm: dict[str, dict[str, int]] = {}
     for r in rows:
-        slot = by_arm.setdefault(r['arm'], {'files': 0, 'trace_chars': 0})
+        slot = by_arm.setdefault(r['arm'], {'files': 0})
         slot['files'] += 1
-        slot['trace_chars'] += r['trace_chars']
     print(json.dumps({'files': len(rows), 'by_arm': by_arm}, indent=2))
 
 
@@ -561,10 +460,6 @@ def cmd_report(args) -> None:
         'confidence_gate': gate,
         'files_judged': len(rows),
         'failed': sum(1 for r in rows if not r.get('ok')),
-        'not_fitting_budget': sum(1 for r in rows if not r.get('summary_fits', True)),
-        'summary_prompt_tokens': sum(r.get('summary_usage', {}).get('prompt_tokens', 0) for r in rows),
-        'summary_completion_tokens': sum(r.get('summary_usage', {}).get('completion_tokens', 0) for r in rows),
-        'jev_input_tokens': sum(r.get('input_tokens', 0) or 0 for r in rows),
         'by_arm': by_arm,
     }
     output_json = args.output_json or OUT / 'summary.json'

@@ -12,8 +12,14 @@ from experiments.direct_reciprocity import condition_generation as generation
 from experiments.direct_reciprocity import specificity
 from experiments.direct_reciprocity import run
 from experiments.direct_reciprocity.core import Config
-from experiments.direct_reciprocity.records import write_json, begin_request
+from experiments.direct_reciprocity.records import read_json, write_json, begin_request
 from experiments.direct_reciprocity.specificity_assets import SCORE_ARMS, information_prompt
+
+
+@pytest.fixture(autouse=True)
+def configured_models(monkeypatch):
+    monkeypatch.setenv('DEEPSEEK_MODEL', 'offline-deepseek')
+    monkeypatch.setenv('QWEN_MODEL', 'offline-qwen')
 
 
 def rows(path):
@@ -185,9 +191,9 @@ def test_shared_native_transport_preserves_parameters_and_reuses_completed_reque
             pass
 
         def __iter__(self):
-            yield SimpleNamespace(id='offline-response', model=spec['model'], usage=None,
+            yield SimpleNamespace(id='offline-response', model='provider-model-alias', usage=None,
                                   choices=[SimpleNamespace(index=0, delta=SimpleNamespace(content=code,
-                                      reasoning_content='offline reasoning' if mode == 'on' else ''), finish_reason='stop')],
+                                      reasoning_content=''), finish_reason='stop')],
                                   model_dump=lambda: {'offline': True})
 
     class Client:
@@ -214,6 +220,8 @@ def test_shared_native_transport_preserves_parameters_and_reuses_completed_reque
     expected['messages'] = [{'role': 'user', 'content': spec['prompt']}]
     assert sent == [expected]
     saved = root / 'requests_candidates' / (job['id'] + '.json')
+    assert read_json(saved)['returned_model'] == 'provider-model-alias'
+    assert read_json(saved)['reasoning_content'] == ''
     before = saved.read_bytes()
     # Recover a candidate container from a durable response without another request.
     (root / 'candidates' / (job['id'] + '.json')).unlink()

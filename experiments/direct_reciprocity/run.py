@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict, replace
 import json
+import os
 from pathlib import Path
 import time
 
@@ -15,7 +16,7 @@ from .records import (read_json, write_json, initial_identity, request_budget,
 from .reuse import reuse_initial
 from .selection import selection_plan
 from .prompts import build_prompt
-from ..config.load_env import get_api_key, get_base_url, get_model
+from ..config.load_env import get_api_key, get_base_url, api_environment, require_model
 
 
 def validate(record, identity, cfg):
@@ -169,7 +170,7 @@ def main():
     parser.add_argument('--output',default='results/direct_reciprocity')
     parser.add_argument('--provider',default='deepseek')
     parser.add_argument('--model')
-    parser.add_argument('--env-file',type=Path)
+    parser.add_argument('--env-file',type=Path,default=Path(__file__).resolve().parents[2]/'.env')
     parser.add_argument('--initial-source',type=Path)
     parser.add_argument('--seed',type=int,default=0)
     parser.add_argument('--prompt',choices=['minimal','score','full'],default='minimal')
@@ -185,12 +186,11 @@ def main():
     parser.add_argument('--workers',type=int,default=2)
     parser.add_argument('--seeds',type=int,nargs='+',default=[0,1,2,3,4])
     args=parser.parse_args()
-    if args.env_file:
-        from dotenv import load_dotenv
-        load_dotenv(args.env_file,override=False)
+    os.environ.update(api_environment(args.env_file))
     cfg=Config(seed=args.seed,prompt=args.prompt,selection=args.selection,generations=args.generations,
                population_size=args.population_size,eliminate=args.eliminate,rounds=args.rounds,repeats=args.repeats)
-    model=get_model(args.provider,args.model)
+    model=require_model(args.provider, {args.provider.upper()+'_MODEL':args.model}
+                        if args.model is not None else None)
     if args.matrix:
         from .matrix import run_matrix
         return run_matrix(args,model)

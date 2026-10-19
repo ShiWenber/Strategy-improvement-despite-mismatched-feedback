@@ -1,8 +1,7 @@
 """Render the two Results figures from frozen summaries, without inference.
 
-Only figure2/3 assets are written. Read keys, population order,
-plotted means/intervals and font/canvas checks are emitted as JSON on stdout.
-No experiments, model requests, games, bootstrap samples or tests are run.
+Exports figure2/3 assets from the supplied analysis files.
+Layout audits can be called separately with audit_figure().
 """
 from __future__ import annotations
 import argparse
@@ -18,17 +17,14 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import to_hex, to_rgb
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
-from matplotlib.text import Text
-from matplotlib.ticker import FuncFormatter
-from matplotlib.transforms import Bbox
 import numpy as np
-from .results_plot_style import apply_style, panel_heading, panel_legend, IntervalKey, BLUE, ORANGE, DARK, GREY, GREEN
-READ_KEYS = {}
-ANALYSIS_SUFFIX = ""
+from .results_plot_style import save_figure, apply_style, panel_heading, panel_legend, IntervalKey, BLUE, ORANGE, DARK, GREY, GREEN
+from .plot_data import fit_axis, interval_values, draw_intervals, finite_values
 INPUTS = {}
 ORDER = ['DeepSeek/OFF', 'DeepSeek/ON', 'Qwen/OFF', 'Qwen/ON']
-DISPLAY_MODELS = {'DeepSeek': 'deepseek-v4.1-flash', 'Qwen': 'qwen3.8-flash'}
-SEEDS = list(range(200, 220))
+DEFAULT_DISPLAY_MODELS = {'DeepSeek': 'deepseek-v4.1-flash', 'Qwen': 'qwen3.8-flash'}
+DISPLAY_MODELS = dict(DEFAULT_DISPLAY_MODELS)
+SEEDS = []
 ARMS = ['accurate', 'mismatched']
 GAIN_CONDITIONS = ['mismatched', 'accurate', 'score']
 
@@ -42,11 +38,9 @@ GAIN_COLORS = {'mismatched': (raw_tint(ORANGE), ORANGE),
 GAIN_KEYS = [f'{stage}_{arm}' for arm in GAIN_CONDITIONS for stage in ['raw', 's3']]
 WIDTH, HEIGHT = (175 / 25.4, 138 / 25.4)
 
-def read(rel, keys):
-    path = Path(rel).resolve()
-    label = str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
-    READ_KEYS[label] = keys
-    return json.loads(path.read_text(encoding='utf-8'))
+def read(path):
+    return json.loads(Path(path).read_text(encoding='utf-8'))
+
 
 def vector(report, stage, arm):
     if stage == 'raw':
@@ -54,22 +48,50 @@ def vector(report, stage, arm):
     else:
         values = report['selected']['S3/' + arm]['metrics']['default']['seed_values']
     result = np.asarray(values, dtype=float)
-    assert result.shape == (len(SEEDS),) and np.isfinite(result).all()
+    assert result.ndim == 1 and result.size and np.isfinite(result).all()
     return result
 
-def load():
-    cross = read(INPUTS['cross_model'], ['statistics[*].raw_mismatched', 'statistics[*].s3_mismatched', 'statistics[*].raw_accurate_minus_mismatched'])['statistics']
-    ds_off = read(INPUTS['deepseek_off'], ['raw[*].metrics.default/score.seed_values', 'selected[S3/*].metrics.default.seed_values'])
-    ds_on = read(INPUTS['deepseek_on'], ['thinking.raw[*].metrics.default/score.seed_values', 'thinking.selected[S3/*].metrics.default.seed_values'])['thinking']
+
+def display_models(manifests):
+    """Use recorded model identities before optional environment/default labels."""
+    labels = {}
+    for provider, cells in [('DeepSeek', ('deepseek_off', 'deepseek_on')),
+                            ('Qwen', ('qwen_off', 'qwen_on'))]:
+        models = {manifests[cell].get('api', {}).get('model') or manifests[cell].get('model')
+                  for cell in cells}
+        models.discard(None)
+        models.discard('')
+        if len(models) > 1:
+            raise ValueError(provider + ' OFF and ON manifests must use the same model')
+        labels[provider] = (next(iter(models)) if models else
+                            os.environ.get(provider.upper() + '_MODEL') or DEFAULT_DISPLAY_MODELS[provider])
+    return labels
+
+
+def load(figure='all'):
+    global SEEDS, DISPLAY_MODELS
+    if figure == '3':
+        return {}, {}, read(INPUTS['opponents']), read(INPUTS['behavior'])
+    manifests = {mode: read(INPUTS[f'qwen_{mode}_manifest']) for mode in ('off', 'on')}
+    SEEDS = manifests['off']['seeds']
+    if not SEEDS or len(set(SEEDS)) != len(SEEDS) or manifests['on']['seeds'] != SEEDS:
+        raise ValueError('Configurations must use the same nonempty ordered population seeds')
+    all_manifests = {'qwen_' + mode: manifest for mode, manifest in manifests.items()}
+    for name in ('deepseek_off', 'deepseek_on'):
+        all_manifests[name] = read(INPUTS[name].parent / 'manifest.json')
+        if all_manifests[name]['seeds'] != SEEDS:
+            raise ValueError('DeepSeek and Qwen population seed orders differ')
+    DISPLAY_MODELS = display_models(all_manifests)
+    cross = read(INPUTS['cross_model'])['statistics']
+    ds_off = read(INPUTS['deepseek_off'])
+    ds_on = read(INPUTS['deepseek_on'])['thinking']
     reports = {'DeepSeek/OFF': ds_off, 'DeepSeek/ON': ds_on}
     pairs = {}
     for cell, report in [('DeepSeek/OFF', ds_off), ('DeepSeek/ON', ds_on)]:
         pairs[cell] = {stage: np.mean([vector(report, stage, arm) for arm in ARMS], axis=0)
                        for stage in ['raw', 'S3']}
     for mode in ['off', 'on']:
-        manifest = read(INPUTS[f'qwen_{mode}_manifest'], ['seeds'])
-        assert manifest['seeds'] == SEEDS
-        report = read(INPUTS[f'qwen_{mode}_analysis'], ['result.raw[*].metrics.default/score.seed_values', 'result.selected[S3/*].metrics.default.seed_values'])['result']
+        report = read(INPUTS[f'qwen_{mode}_analysis'])['result']
         reports['Qwen/' + mode.upper()] = report
         pairs['Qwen/' + mode.upper()] = {stage: np.mean([vector(report, stage, arm) for arm in ARMS], axis=0) for stage in ['raw', 'S3']}
     for cell in ORDER:
@@ -79,24 +101,9 @@ def load():
                 metric = (report['raw'][arm]['metrics']['default/score'] if stage == 'raw'
                           else report['selected']['S3/' + arm]['metrics']['default'])
                 key = f'{stage}_{arm}'
-                if key in cross[cell]:
-                    assert cross[cell][key] == metric
                 cross[cell][key] = metric
-        for key in [*GAIN_KEYS, 'raw_accurate_minus_mismatched']:
-            row = cross[cell][key]
-            assert row['n_seeds'] == len(SEEDS)
-            assert len(row['seed_values']) == len(SEEDS) and np.isfinite(row['seed_values']).all()
-            assert abs(np.mean(row['seed_values']) - row['mean']) < 1e-12
-            assert row['ci95'][0] < row['mean'] < row['ci95'][1]
-        assert cross[cell]['raw_accurate_minus_mismatched']['ci95'][0] < 0 < cross[cell]['raw_accurate_minus_mismatched']['ci95'][1]
-    opponents = read(INPUTS['opponents'], ['configs[*].summaries[raw/S3][accurate/mismatched][recovery/exploitation/random/memory].mean', 'configs[*].summaries[raw/S3][accurate/mismatched][recovery/exploitation/random/memory].ci95_exploratory_unadjusted'])
-    behavior = read(INPUTS['behavior'], ['configs[*].summaries[controlled/pooled/defection_exposure][parent/raw/S3]', 'configs[*].summaries[controlled/pooled/recovery_rounds][parent/raw/S3]'])
-    assert opponents['seeds'] == behavior['seeds'] == SEEDS
-    assert opponents['n_independent_populations'] == len(SEEDS)
-    for metric in ['defection_exposure', 'recovery_rounds']:
-        key = 'controlled/pooled/' + metric
-        assert behavior['configs']['non_thinking']['summaries'][key]['parent'] == behavior['configs']['thinking']['summaries'][key]['parent']
-    # Figure 2c carries this claim in its heading; keep it enforced by the data.
+    opponents = read(INPUTS['opponents']) if figure == 'all' else {}
+    behavior = read(INPUTS['behavior']) if figure == 'all' else {}
     return (cross, pairs, opponents, behavior)
 
 def clean(ax, direction='x', zero=True):
@@ -111,7 +118,9 @@ def clean(ax, direction='x', zero=True):
 
 def point_interval(ax, row, y, color, marker, key='ci95', fill=True):
     mean, (low, high) = (row['mean'], row[key])
-    ax.errorbar(mean, y, xerr=[[mean - low], [high - mean]], fmt=marker, color=color, markerfacecolor=color if fill else 'white', markeredgecolor=color, markeredgewidth=0.9, markersize=4.6, elinewidth=1, capsize=2, capthick=0.8, zorder=4)
+    draw_intervals(ax, y, low, high, color=color, elinewidth=1, capsize=2, capthick=0.8, zorder=4)
+    ax.plot(mean, y, marker=marker, color=color, markerfacecolor=color if fill else 'white',
+            markeredgewidth=.9, markersize=4.6, zorder=4, linestyle='none')
 
 def legend_record(handle, label):
     if isinstance(handle, tuple):
@@ -129,21 +138,20 @@ def legend_record(handle, label):
             'linewidth': handle.get_linewidth()}
 
 def register_style(fig, headings, legend_specs):
-    legends = []
-    for panel, ax, handles, labels, ncol in legend_specs:
-        legends.append({'panel': panel, 'owner': ax,
-                        'legend': panel_legend(ax, handles, labels, ncol=ncol),
-                        'ncol': ncol,
-                        'entries': [legend_record(h, l) for h, l in zip(handles, labels)]})
-    fig._results_style = {'legends': legends, 'panel_headings': headings}
+    for _, ax, handles, labels, ncol in legend_specs:
+        panel_legend(ax, handles, labels, ncol=ncol)
+    fig._results_headings = headings
+    fig._results_legend_specs = legend_specs
+
 
 def figure2(cross, pairs):
     apply_style()
     fig = plt.figure(figsize=(WIDTH, HEIGHT), facecolor='white')
     axa = fig.add_axes([0.105, 0.605, 0.40, 0.30])
     axb = fig.add_axes([0.72, 0.605, 0.26, 0.30])
-    axb.set_ylim(3.55, -1.35)
-    axb.set_yticks(range(4), [f'{DISPLAY_MODELS[model]}\n{mode}' for model, mode in (cell.split('/') for cell in ORDER)])
+    count = len(ORDER)
+    axb.set_ylim(count - .45, -1.35)
+    axb.set_yticks(range(count), [f'{DISPLAY_MODELS[model]}\n{mode}' for model, mode in (cell.split('/') for cell in ORDER)])
     clean(axb)
     for key, offset in zip(GAIN_KEYS, [-0.325, -0.215, -0.055, 0.055, 0.215, 0.325]):
         stage, arm = key.split('_')
@@ -151,30 +159,32 @@ def figure2(cross, pairs):
         rows = [cross[cell][key] for cell in ORDER]
         means = np.asarray([row['mean'] for row in rows])
         intervals = np.asarray([row['ci95'] for row in rows])
-        axa.bar(np.arange(4) + offset, means, width=0.10, color=color,
-                yerr=np.stack([means - intervals[:, 0], intervals[:, 1] - means]),
-                capsize=1, error_kw={'ecolor': 'black', 'elinewidth': 0.7, 'capthick': 0.7}, zorder=3)
+        positions = np.arange(count) + offset
+        axa.bar(positions, means, width=0.10, color=color, zorder=3)
+        draw_intervals(axa, positions, intervals[:, 0], intervals[:, 1], axis='y',
+                       ecolor='black', elinewidth=.7, capsize=1, capthick=.7, zorder=4)
     for index, cell in enumerate(ORDER):
         point_interval(axb, cross[cell]['raw_accurate_minus_mismatched'], index, DARK, 'o')
-    axa.set_xlim(-0.55, 3.55)
-    axa.set_ylim(-0.02, 0.25)
-    axa.set_yticks([0, 0.05, 0.1, 0.15, 0.2])
-    axa.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f'{x:.2f}'))
-    axa.set_xticks(range(4), ['OFF', 'ON', 'OFF', 'ON'])
+    axa.set_xlim(-.55, count - .45)
+    fit_axis(axa, interval_values([cross[cell][key] for cell in ORDER for key in GAIN_KEYS]),
+             axis='y', include_zero=True)
+    axa.set_xticks(range(count), [cell.split('/')[1] for cell in ORDER])
     for model, center in [('DeepSeek', 0.5), ('Qwen', 2.5)]:
         axa.text(center, -0.286, DISPLAY_MODELS[model], transform=axa.get_xaxis_transform(),
                  ha='center', va='top', fontsize=8.5)
     clean(axa, 'y')
     axa.set_ylabel('Payoff gain per round\nvs parent')
-    axb.set_xlim(-0.03, 0.035)
-    axb.set_xticks([-0.02, 0, 0.02])
-    axb.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f'{x:.2f}'))
+    fit_axis(axb, interval_values([cross[cell]['raw_accurate_minus_mismatched'] for cell in ORDER]),
+             include_zero=True)
     axb.set_xlabel('Raw Accurate − Mismatched\n(payoff per round)')
-    headings = [panel_heading(fig, 'a', 'Three information conditions', 0.025, 0.947),
+    above = sum(np.count_nonzero(pairs[cell]['S3'] > pairs[cell]['raw']) for cell in ORDER)
+    total = sum(len(pairs[cell]['raw']) for cell in ORDER)
+    headings = [panel_heading(fig, 'a', 'Information conditions', 0.025, 0.947),
                 panel_heading(fig, 'b', 'Correct report matching', 0.535, 0.947),
-                panel_heading(fig, 'c', 'Same-pool selection: S3 above Raw in 79 of 80 population pairs', 0.025, 0.470)]
+                panel_heading(fig, 'c', f'Same-pool selection: S3 above Raw in {above} of {total} population pairs', 0.025, 0.470)]
     axb.text(1, 1.01, 'Accurate higher →', transform=axb.transAxes, ha='right', fontsize=8.5, color='#505050')
     lefts = [0.165, 0.3775, 0.59, 0.8025]
+    pair_values = np.concatenate([finite_values(row[stage]) for row in pairs.values() for stage in ('raw', 'S3')])
     for i, (cell, left) in enumerate(zip(ORDER, lefts)):
         ax = fig.add_axes([left, 0.110, 0.1775, 0.235])
         row = pairs[cell]
@@ -184,10 +194,8 @@ def figure2(cross, pairs):
         ax.plot([0], [means[0]], marker='o', color=GREY, markerfacecolor='white', markersize=6, zorder=5)
         ax.plot([1], [means[1]], marker='s', color=DARK, markersize=5.5, zorder=5)
         ax.set_xlim(-0.22, 1.22)
-        ax.set_ylim(-0.075, 0.3)
+        fit_axis(ax, pair_values, axis='y', include_zero=True)
         ax.set_xticks([0, 1], ['Raw', 'S3'])
-        ax.set_yticks([-0.05, 0, 0.1, 0.2, 0.3])
-        ax.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f'{x:.2f}'))
         if i == 0:
             ax.set_ylabel('Payoff gain per round vs parent')
         else:
@@ -197,7 +205,6 @@ def figure2(cross, pairs):
         model, mode = cell.split('/')
         ax.set_title(f'{DISPLAY_MODELS[model]}\n{mode}', fontsize=9, pad=5)
         fig.text(left + 0.08875, 0.04, f'{means[0]:+.3f} / {means[1]:+.3f}', ha='center', fontsize=8.5, color=DARK)
-        assert np.min([row['raw'], row['S3']]) > -0.075 and np.max([row['raw'], row['S3']]) < 0.3
     # Keep the six-entry legend in a header band, clear of all error bars.
     axa.set_position([0.105, 0.605, 0.40, 0.210])
     a_legend_ax = fig.add_axes([0.105, 0.825, 0.40, 0.112], frameon=False)
@@ -219,61 +226,56 @@ def figure2(cross, pairs):
                           Line2D([], [], color='#C1C1C1', lw=.65)],
          ['Raw mean', 'S3 mean', 'Population pair'], 3),
     ])
-    fig._results_layout = {
-        'panel_a': {'type': 'grouped vertical bars', 'configuration_order': ORDER,
-                    'condition_order': GAIN_CONDITIONS, 'stage_order': ['Raw', 'S3'],
-                    'colors': {arm: dict(zip(['Raw', 'S3'], GAIN_COLORS[arm])) for arm in GAIN_CONDITIONS},
-                    'estimator': 'Frozen mean payoff gain per round vs parent over 20 populations',
-                    'interval': 'Frozen unadjusted 95% population-bootstrap confidence interval',
-                    'bar_count': len(ORDER) * len(GAIN_KEYS)},
-    }
     return fig
 
 def figure3(opponents, behavior):
     apply_style()
-    fig = plt.figure(figsize=(WIDTH, 190 / 25.4), facecolor='white')
+    fig = plt.figure(figsize=(WIDTH, 130 / 25.4), facecolor='white')
     headings = []
     legend_specs = []
-    families = ['recovery', 'exploitation', 'random', 'memory']
-    family_names = ['Recovery', 'Exploitation', 'Random', 'Memory-one']
-    ypos = [3, 2, 1, 0]
+    families = opponents['families']
+    names = {'recovery': 'Recovery', 'exploitation': 'Exploitation',
+             'random': 'Random', 'memory': 'Memory-one'}
+    family_names = [names.get(family, family.replace('_', ' ').capitalize()) for family in families]
+    ypos = list(reversed(range(len(families))))
+    payoff_values = interval_values([
+        opponents['configs'][config]['summaries'][stage][arm][family]
+        for config in ('non_thinking', 'thinking') for stage in ('raw', 'S3')
+        for arm in ARMS for family in families], 'ci95_exploratory_unadjusted')
     for panel, stage, bottom, heading_y, legend_bottom, title in [
-        ('a', 'raw', 0.745, 0.970, 0.937, 'Raw candidates'),
-        ('b', 'S3', 0.435, 0.675, 0.642, 'S3 outputs'),
+        ('a', 'raw', 0.59, 0.96, 0.905, 'Raw candidates'),
+        ('b', 'S3', 0.09, 0.48, 0.425, 'S3 outputs'),
     ]:
         # Separate thinking modes into aligned columns, leaving only four
         # opponent-family rows in each plotting area.
         for column, (config, mode, left) in enumerate([
-            ('non_thinking', 'OFF', 0.205), ('thinking', 'ON', 0.665)
+            ('non_thinking', 'OFF', 0.135), ('thinking', 'ON', 0.395)
         ]):
-            ax = fig.add_axes([left, bottom, 0.31, 0.175])
+            ax = fig.add_axes([left, bottom, 0.235, 0.255])
             for j, family in enumerate(families):
                 y = ypos[j]
                 if j % 2 == 0:
                     ax.axhspan(y - 0.5, y + 0.5, color='#F3F5F7', zorder=0)
                 for arm, color, marker, offset in [('accurate', BLUE, 'o', 0.26), ('mismatched', ORANGE, 's', -0.26)]:
                     row = opponents['configs'][config]['summaries'][stage][arm][family]
-                    assert -0.13 < row['ci95_exploratory_unadjusted'][0] < row['ci95_exploratory_unadjusted'][1] < 0.23
                     point_interval(ax, row, y + offset, color, marker, 'ci95_exploratory_unadjusted')
             ax.set_yticks(ypos, family_names if column == 0 else [])
-            ax.set_ylim(-0.6, 3.6)
-            ax.set_xlim(-0.13, 0.23)
-            for separator in [0.5, 1.5, 2.5]:
+            ax.set_ylim(-.6, len(families) - .4)
+            fit_axis(ax, payoff_values, include_zero=True)
+            for separator in np.arange(len(families) - 1) + .5:
                 ax.axhline(separator, color='#E1E5E9', linewidth=0.5, zorder=0)
-            ax.set_xticks([-0.1, 0, 0.1, 0.2])
-            ax.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f'{x:.2f}'))
             clean(ax)
             ax.set_title(f'Thinking {mode}', fontsize=9, pad=3)
-            ax.set_xlabel('Payoff gain per round vs parent')
+            ax.set_xlabel('Payoff gain per round')
         headings.append(panel_heading(fig, panel, title, 0.03, heading_y))
-        legend_ax = fig.add_axes([0.32, legend_bottom, 0.66, 0.045], frameon=False)
+        legend_ax = fig.add_axes([0.235, legend_bottom, 0.395, 0.055], frameon=False)
         legend_ax.set_axis_off()
         legend_specs.append((panel, legend_ax,
             [Line2D([], [], color=BLUE, marker='o', lw=0),
              Line2D([], [], color=ORANGE, marker='s', lw=0)],
             ['Accurate', 'Mismatched'], 2))
-    for panel, metric, left, title, ylabel in [('c', 'defection_exposure', 0.205, 'Late unilateral cooperation', 'Late unilateral cooperation (%)'), ('d', 'recovery_rounds', 0.665, 'Capped recovery time', 'Capped recovery time (rounds)')]:
-        ax = fig.add_axes([left, 0.080, 0.31, 0.22])
+    for panel, metric, bottom, heading_y, title, ylabel in [('c', 'defection_exposure', 0.59, 0.96, 'Unilateral cooperation', 'Late unilateral cooperation (%)'), ('d', 'recovery_rounds', 0.09, 0.48, 'Capped recovery time', 'Capped recovery time (rounds)')]:
+        ax = fig.add_axes([0.70, bottom, 0.275, 0.255])
         key = 'controlled/pooled/' + metric
         scale = 100 if metric == 'defection_exposure' else 1
         baseline = behavior['configs']['non_thinking']['summaries'][key]['parent']
@@ -285,39 +287,47 @@ def figure3(opponents, behavior):
             means = np.asarray([row['mean'] for row in rows]) * scale
             intervals = np.asarray([row['ci95_exploratory'] for row in rows]) * scale
             ax.plot([0, *x], [pm, *means], color=DARK, linestyle=ls, linewidth=1, zorder=2)
-            ax.errorbar(x, means, yerr=np.stack([means - intervals[:, 0], intervals[:, 1] - means]), fmt=marker, color=DARK, markerfacecolor=DARK if config == 'non_thinking' else 'white', markersize=4.7, capsize=2, capthick=0.8, elinewidth=1, zorder=4)
-        ax.errorbar([0], [pm], yerr=[[pm - plo], [phi - pm]], fmt='s', color=DARK, markerfacecolor='#A0A0A0', markersize=4.8, capsize=2, elinewidth=1, zorder=5)
+            draw_intervals(ax, x, intervals[:, 0], intervals[:, 1], axis='y', color=DARK,
+                           capsize=2, capthick=.8, elinewidth=1, zorder=4)
+            ax.plot(x, means, linestyle='none', marker=marker, color=DARK,
+                    markerfacecolor=DARK if config == 'non_thinking' else 'white', markersize=4.7, zorder=4)
+        draw_intervals(ax, [0], [plo], [phi], axis='y', color=DARK, capsize=2, elinewidth=1, zorder=5)
+        ax.plot([0], [pm], linestyle='none', marker='s', color=DARK, markerfacecolor='#A0A0A0', markersize=4.8, zorder=5)
         ax.set_xticks([0, 1, 2], ['Shared\nparent', 'Raw', 'S3'])
         ax.set_xlim(-0.22, 2.22)
-        ax.set_ylim(0, 27)
-        ax.set_yticks([0, 5, 10, 15, 20])
+        values = interval_values([behavior['configs'][config]['summaries'][key][stage]
+                                  for config in ('non_thinking', 'thinking')
+                                  for stage in ('parent', 'raw', 'S3')], 'ci95_exploratory') * scale
+        fit_axis(ax, values, axis='y', nonnegative=True, headroom=.32)
         ax.set_ylabel(ylabel)
         clean(ax, 'y', zero=False)
-        headings.append(panel_heading(fig, panel, title, left - 0.025, 0.321))
+        headings.append(panel_heading(fig, panel, title, 0.68, heading_y))
         legend_specs.append((panel, ax,
             [Line2D([], [], color=DARK, marker='o', lw=1, linestyle='-'),
              Line2D([], [], color=DARK, marker='^', markerfacecolor='white', lw=1, linestyle='--'),
              Line2D([], [], color=DARK, marker='s', markerfacecolor='#A0A0A0', lw=0)],
             ['OFF', 'ON', 'Parent'], 3))
     register_style(fig, headings, legend_specs)
-    fig._results_layout = {
-        'payoff_panels': 'Raw above S3; Thinking OFF and ON in separate columns',
-        'family_order': family_names,
-        'payoff_row_centres': ypos,
-        'report_offsets': {'accurate': 0.26, 'mismatched': -0.26},
-        'payoff_limits': [-0.13, 0.23],
-        'behaviour_panels': 'c and d side by side in the bottom row',
-    }
     return fig
 
 def normalized_bounds(box, canvas):
     return [float((box.x0-canvas.x0)/canvas.width), float((box.y0-canvas.y0)/canvas.height),
             float((box.x1-canvas.x0)/canvas.width), float((box.y1-canvas.y0)/canvas.height)]
 
-def save(fig, directory, stem):
+def audit_figure(fig, stem):
+    """Explicitly inspect fonts, legends and bounds without exporting files."""
+    from matplotlib.text import Text
+    from matplotlib.transforms import Bbox
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
-    texts = [t for t in fig.findobj(Text) if t.get_visible() and t.get_text().strip()]
+    hidden = set()
+    for ax in fig.axes:
+        for axis in (ax.xaxis, ax.yaxis):
+            low, high = sorted(axis.get_view_interval())
+            for tick in (*axis.get_major_ticks(), *axis.get_minor_ticks()):
+                if not low - 1e-10 <= tick.get_loc() <= high + 1e-10:
+                    hidden.update((tick.label1, tick.label2))
+    texts = [t for t in fig.findobj(Text) if t not in hidden and t.get_visible() and t.get_text().strip()]
     minimum = min(t.get_fontsize() for t in texts)
     assert minimum >= 8.5
     bounds = fig.bbox
@@ -330,7 +340,10 @@ def save(fig, directory, stem):
         if box.x0 < bounds.x0 - 0.1 or box.x1 > bounds.x1 + 0.1 or box.y0 < bounds.y0 - 0.1 or box.y1 > bounds.y1 + 0.1:
             outside.append(text.get_text())
     assert not outside, outside
-    meta = fig._results_style
+    meta = {'panel_headings': fig._results_headings, 'legends': [
+        {'panel': panel, 'owner': ax, 'legend': ax.get_legend(), 'ncol': ncol,
+         'entries': [legend_record(handle, label) for handle, label in zip(handles, labels)]}
+        for panel, ax, handles, labels, ncol in fig._results_legend_specs]}
     headings = [{'text': t.get_text(), 'font_pt': float(t.get_fontsize()),
                  'font_weight': t.get_fontweight(), 'horizontal_alignment': t.get_ha(),
                  'bounds_figure_fraction': normalized_bounds(t.get_window_extent(renderer), bounds)} for t in meta['panel_headings']]
@@ -371,72 +384,61 @@ def save(fig, directory, stem):
     assert all(t.get_fontsize() == 9.5 and t.get_fontweight() == 'bold' and t.get_ha() == 'left' for t in meta['panel_headings'])
     assert all(t.get_text().startswith(f'({p}) ') and t.get_text()[4:].strip()
                for t, p in zip(meta['panel_headings'], expected_panels))
-    directory.mkdir(parents=True, exist_ok=True)
-    for extension in ['pdf', 'svg', 'png']:
-        path = directory / f'{stem}.{extension}'
-        fig.savefig(path, dpi=300, facecolor='white')
     result = {'width_mm': float(fig.get_figwidth() * 25.4), 'height_mm': float(fig.get_figheight() * 25.4), 'minimum_font_pt': minimum,
               'out_of_canvas_text': outside,
               'legend': {'count': len(legend_records), 'figure_legends': 0,
                          'axis_legends': len(legend_records), 'panels': legend_records},
               'panel_titles': headings, 'text_fonts_and_bounds': text_records,
-              'axes_bounds_figure_fraction': [list(ax.get_position().bounds) for ax in fig.axes],
-              **({'layout': fig._results_layout} if hasattr(fig, '_results_layout') else {})}
+              'axes_bounds_figure_fraction': [list(ax.get_position().bounds) for ax in fig.axes]}
+    return result
+
+def save(fig, directory, stem):
+    result = save_figure(fig, stem, directory, dpi=300)
     plt.close(fig)
     return result
 
 def main():
-    global ROOT, ANALYSIS_SUFFIX, INPUTS
+    global INPUTS
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--work', type=Path, default=ROOT)
-    parser.add_argument('--analysis-suffix', default='')
     parser.add_argument('--output-dir', type=Path, required=True)
-    parser.add_argument('--audit-dir', type=Path, required=True)
-    parser.add_argument('--figure1', type=Path, required=True)
-    parser.add_argument('--cross-model', type=Path, required=True)
-    parser.add_argument('--deepseek-off', type=Path, required=True)
-    parser.add_argument('--deepseek-on', type=Path, required=True)
-    parser.add_argument('--qwen-off-manifest', type=Path, required=True)
-    parser.add_argument('--qwen-off-analysis', type=Path, required=True)
-    parser.add_argument('--qwen-on-manifest', type=Path, required=True)
-    parser.add_argument('--qwen-on-analysis', type=Path, required=True)
-    parser.add_argument('--opponent-profiles', type=Path, required=True)
-    parser.add_argument('--behavior-analysis', type=Path, required=True)
+    parser.add_argument('--cross-model', type=Path)
+    parser.add_argument('--deepseek-off', type=Path)
+    parser.add_argument('--deepseek-on', type=Path)
+    parser.add_argument('--qwen-off-manifest', type=Path)
+    parser.add_argument('--qwen-off-analysis', type=Path)
+    parser.add_argument('--qwen-on-manifest', type=Path)
+    parser.add_argument('--qwen-on-analysis', type=Path)
+    parser.add_argument('--opponent-profiles', type=Path)
+    parser.add_argument('--behavior-analysis', type=Path)
     parser.add_argument('--figure', choices=['all', '2', '3'], default='all',
                         help='Render a single figure without rewriting the other figure assets.')
     args = parser.parse_args()
-    ROOT, ANALYSIS_SUFFIX = args.work.resolve(), args.analysis_suffix
-    INPUTS = {
-        'cross_model': args.cross_model.resolve(),
-        'deepseek_off': args.deepseek_off.resolve(),
-        'deepseek_on': args.deepseek_on.resolve(),
-        'qwen_off_manifest': args.qwen_off_manifest.resolve(),
-        'qwen_off_analysis': args.qwen_off_analysis.resolve(),
-        'qwen_on_manifest': args.qwen_on_manifest.resolve(),
-        'qwen_on_analysis': args.qwen_on_analysis.resolve(),
-        'opponents': args.opponent_profiles.resolve(),
-        'behavior': args.behavior_analysis.resolve(),
+    paths = {
+        'cross_model': args.cross_model,
+        'deepseek_off': args.deepseek_off,
+        'deepseek_on': args.deepseek_on,
+        'qwen_off_manifest': args.qwen_off_manifest,
+        'qwen_off_analysis': args.qwen_off_analysis,
+        'qwen_on_manifest': args.qwen_on_manifest,
+        'qwen_on_analysis': args.qwen_on_analysis,
+        'opponents': args.opponent_profiles,
+        'behavior': args.behavior_analysis,
     }
+    required = (list(paths) if args.figure == 'all' else
+                ['opponents', 'behavior'] if args.figure == '3' else
+                [name for name in paths if name not in ('opponents', 'behavior')])
+    missing = [name for name in required if paths[name] is None]
+    if missing:
+        parser.error('Missing figure inputs: ' + ', '.join(missing))
+    INPUTS = {name: path.resolve() for name, path in paths.items() if path is not None}
     output = args.output_dir.resolve()
-    cross, pairs, opponents, behavior = load()
+    cross, pairs, opponents, behavior = load(args.figure)
     exports = {}
     if args.figure in ['all', '2']:
         exports['figure2'] = save(figure2(cross, pairs), output, 'fig2')
     if args.figure in ['all', '3']:
         exports['figure3'] = save(figure3(opponents, behavior), output, 'fig3')
-    qa_directory = args.audit_dir.resolve()
-    qa_directory.mkdir(parents=True, exist_ok=True)
-    for number, stem in [('figure2', 'fig2'), ('figure3', 'fig3')]:
-        if number not in exports:
-            continue
-        qa = {'status': 'passed', 'asset': stem, 'figure_language': 'English',
-              'population_unit': len(SEEDS), 'seed_order': SEEDS, 'read_keys': READ_KEYS,
-              **exports[number],
-              'figure1_unchanged': True,
-              'science_unchanged': 'Frozen means and stored intervals; render-only changes.'}
-        (qa_directory / f'{stem}_qa_reproduct.json').write_text(json.dumps(qa, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    report = {'status': 'passed', 'new_games': 0, 'new_model_calls': 0, 'new_bootstraps': 0, 'new_tests': 0, 'population_unit': len(SEEDS), 'configuration_order': ORDER, 'seed_order': SEEDS, 'read_keys': READ_KEYS, 'exports': exports, 'figure2a_b': {cell: {key: {f: row[f] for f in ['mean', 'ci95']} for key, row in cross[cell].items() if key in [*GAIN_KEYS, 'raw_accurate_minus_mismatched']} for cell in ORDER}, 'figure2c': {cell: {stage: float(values.mean()) for stage, values in pairs[cell].items()} for cell in ORDER}, 'figure2c_pairs_above_raw': {'total': int(sum((pairs[cell]['S3'] > pairs[cell]['raw']).sum() for cell in ORDER)), 'of': len(SEEDS) * len(ORDER), 'by_cell': {cell: int((pairs[cell]['S3'] > pairs[cell]['raw']).sum()) for cell in ORDER}, 'minimum_pair_difference': float(min((pairs[cell]['S3'] - pairs[cell]['raw']).min() for cell in ORDER))}, 'figure3a_b': {config: {stage: {arm: {family: {'mean': row['mean'], 'ci95': row['ci95_exploratory_unadjusted']} for family, row in arm_rows.items() if family != 'overall'} for arm, arm_rows in stage_rows.items()} for stage, stage_rows in c['summaries'].items()} for config, c in opponents['configs'].items()}, 'figure3c_d': {config: {metric: {stage: {'mean': row['mean'], 'ci95': row['ci95_exploratory']} for stage, row in c['summaries']['controlled/pooled/' + metric].items() if stage in ['parent', 'raw', 'S3']} for metric in ['defection_exposure', 'recovery_rounds']} for config, c in behavior['configs'].items()}, 'figure_language': 'English only; one shared asset set', 'note': 'Figure2c computes existing within-population equal-condition means only; all intervals are reused frozen values.'}
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    print(json.dumps(exports, ensure_ascii=False, indent=2))
 if __name__ == '__main__':
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')

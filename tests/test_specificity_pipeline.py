@@ -41,6 +41,42 @@ def synthetic_holdout(candidate, cfg):
 
 
 class PipelineTest(unittest.TestCase):
+    def setUp(self):
+        configured = patch.dict('os.environ', {'DEEPSEEK_MODEL': 'offline-deepseek', 'QWEN_MODEL': 'offline-qwen'})
+        configured.start()
+        self.addCleanup(configured.stop)
+
+    def test_prepare_continues_with_recorded_initialization_fallbacks(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            manifest = runner.freeze(root, seeds=[901], ranks=[1])
+            for job in manifest['init_jobs']:
+                write_json(root / 'initial' / (job['id'] + '.json'), {'fallback': 'invalid_generation'})
+            with patch('sys.argv', ['specificity', 'prepare', '--output', str(root)]), \
+                 patch.object(runner, 'pool_run') as prepare, patch.object(runner, 'make_prompts') as prompts:
+                runner.main()
+            prepare.assert_called_once()
+            prompts.assert_called_once_with(root, manifest)
+
+    def test_reports_keep_their_full_content_without_length_matching(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            manifest = runner.freeze(root, seeds=[901], ranks=[1])
+            write_json(root / 'populations/s901.json', {
+                'population': [asdict(p) for p in TRAIN[:2]],
+                'selected_slots': {'1': 0}, 'mapping': [1, 0],
+                'diagnostics': ['parent', 'donor'],
+                'assessment': [{'fitness': 1.}, {'fitness': 2.}]})
+            accurate, mismatched = 'Short report.', 'Full donor report. ' * 100
+            with patch.object(runner, 'diagnostic_block', side_effect=[accurate, mismatched]):
+                runner.make_prompts(root, manifest)
+            context = read_json(root / 'contexts/s901-rank1.json')
+            self.assertIn(accurate, context['prompts']['accurate'])
+            self.assertIn(mismatched, context['prompts']['mismatched'])
+            self.assertNotIn(accurate, context['prompts']['score'])
+            self.assertNotIn(mismatched, context['prompts']['score'])
+            self.assertNotIn('block_tokens', context)
+
     def test_failed_parent_is_recorded_and_children_are_skipped(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
@@ -86,6 +122,11 @@ class PipelineTest(unittest.TestCase):
                     runner.prepare_seed((str(root), seed))
                 sealed = runner.make_prompts(root, manifest)
                 self.assertEqual(sealed['effective_mismatch_contexts'], 0)
+                self.assertNotIn('rows', sealed)
+                self.assertNotIn('length_control', manifest)
+                self.assertNotIn('tokenizer', manifest['assets'])
+                with patch.object(runner, 'make_contexts', side_effect=AssertionError('Already prepared')):
+                    self.assertEqual(runner.make_prompts(root, manifest), sealed)
                 for job in manifest['jobs']:
                     runner.candidate_job((str(root), job))
                 identities = [('parent', f's{s}-rank1') for s in (901, 902)]
@@ -98,7 +139,7 @@ class PipelineTest(unittest.TestCase):
                 self.assertEqual(len(manifest['jobs']), 4 * len(arms))
                 if 'score' in arms:
                     context = read_json(root / 'contexts/s901-rank1.json')
-                    self.assertEqual(context['block_tokens']['score'], 0)
+                    self.assertNotIn('block_tokens', context)
                     self.assertIn('CUMULATIVE TRAINING FITNESS:', context['prompts']['score'])
                 self.assertFalse((root / 'holdout').exists())
                 write_json(root / 'H_RELEASED.json', {'status': 'released'})
@@ -106,8 +147,10 @@ class PipelineTest(unittest.TestCase):
                     runner.holdout_job((str(root), kind, identity))
                 write_json(root / 'COMPLETE.json', {'synthetic': True})
                 result = analysis.analyze(root)
-                self.assertEqual(result['audit']['issues'], [])
-                self.assertEqual(result['audit']['n_requests'], 24 + 4 * len(arms))
+                self.assertNotIn('audit', result)
+                audited = analysis.audit(root, manifest)
+                self.assertEqual(audited['issues'], [])
+                self.assertEqual(audited['n_requests'], 24 + 4 * len(arms))
                 self.assertEqual(result['selected']['S3/accurate']['metrics']['default']['mean'], -3)
                 if 'score' in arms:
                     self.assertEqual(result['selected']['S3/score']['metrics']['default']['mean'], -3)
@@ -117,7 +160,7 @@ class PipelineTest(unittest.TestCase):
                         self.assertEqual(prepared['arms'], list(SCORE_ARMS))
                         self.assertEqual(prepared['new_calls'], 12)
                         self.assertEqual(prepared['jobs'], manifest['jobs'])
-                        self.assertEqual(paired_control.verify(paired, root, provider), prepared)
+                        self.assertEqual(paired_control.verify(paired, provider), prepared)
                         for job in prepared['jobs']:
                             context = read_json(paired / 'contexts' / (job['context'] + '.json'))
                 self.assertFalse((root / 'REPORT.md').exists())
@@ -138,8 +181,10 @@ class PipelineTest(unittest.TestCase):
                     runner.holdout_job((str(reused), kind, identity))
                 write_json(reused / 'COMPLETE.json', {'synthetic': True})
                 small = analysis.analyze(reused, '_reproduct')
-                self.assertEqual(small['audit']['n_new_requests'], 4)
-                self.assertEqual(small['audit']['n_reused_initial_requests'], 12)
+                self.assertNotIn('audit', small)
+                audited = analysis.audit(reused, subset)
+                self.assertEqual(audited['n_new_requests'], 4)
+                self.assertEqual(audited['n_reused_initial_requests'], 12)
                 self.assertEqual(small['primary']['n_seeds'], 1)
                 self.assertFalse((reused / 'REPORT_reproduct.md').exists())
                 self.assertFalse((reused / 'initial').exists())

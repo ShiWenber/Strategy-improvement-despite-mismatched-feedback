@@ -13,6 +13,12 @@ from tools.run_fresh_reproduction import Workflow
 from tools import run_fresh_reproduction as fresh
 
 
+@pytest.fixture(autouse=True)
+def configured_models(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_MODEL", "offline-deepseek")
+    monkeypatch.setenv("QWEN_MODEL", "offline-qwen")
+
+
 def test_atomic_record_rename_retries_without_repeating_generation(tmp_path):
     path = tmp_path / "response.json"
     original = Path.replace
@@ -31,21 +37,47 @@ def test_atomic_record_rename_retries_without_repeating_generation(tmp_path):
     assert not path.with_suffix(".json.tmp").exists()
 
 
-def test_plot_stage_refuses_missing_analysis_instead_of_using_archives(tmp_path):
+def test_plot_stage_propagates_missing_input_without_using_archives(tmp_path):
     workflow = Workflow(Namespace(output=tmp_path / "fresh"))
-    with patch("tools.run_fresh_reproduction.subprocess.run") as execute:
-        with pytest.raises(RuntimeError, match="Complete the analysis"):
+    with patch.object(workflow, "run_command", side_effect=FileNotFoundError("missing summary")) as execute:
+        with pytest.raises(FileNotFoundError, match="missing summary"):
             workflow.plots()
-    execute.assert_not_called()
+    assert execute.call_count == 1
 
 
-def test_fresh_validation_rejects_incomplete_api_before_analysis(tmp_path):
+def test_analysis_runs_without_audit_prerequisites(tmp_path, monkeypatch):
     workflow = Workflow(Namespace(output=tmp_path / "fresh"))
-    with patch("tools.run_fresh_reproduction.subprocess.run") as execute:
-        with pytest.raises(FileNotFoundError):
+    (workflow.api / "API_VALIDATION.json").write_text("invalid audit JSON", encoding="utf-8")
+    source = workflow.api / "results" / fresh.RUNS[0]
+    records.write_json(source / "manifest.json", {"jobs": []})
+    (source / "AUDIT.json").write_text("invalid audit JSON", encoding="utf-8")
+    monkeypatch.setattr(fresh, "commands", lambda *args: [("analysis", ["offline-analysis"])])
+    with patch.object(Workflow, "audit_api", side_effect=RuntimeError("audit failed")) as audit:
+        with patch.object(workflow, "run_command") as execute:
             workflow.analyze()
-    execute.assert_not_called()
+    audit.assert_not_called()
+    execute.assert_called_once_with("analysis", ["offline-analysis"], "analysis", resume=False)
     assert not (workflow.analysis / "VALIDATION.json").exists()
+    assert (workflow.analysis / "results" / fresh.RUNS[0] / "manifest.json").is_file()
+    assert not (workflow.analysis / "results" / fresh.RUNS[0] / "AUDIT.json").exists()
+
+
+@pytest.mark.parametrize("audit_fails", [False, True])
+def test_standalone_audit_cannot_change_running_workflow_state(tmp_path, monkeypatch, audit_fails):
+    status = tmp_path / "RUN_STATUS.json"
+    status.write_text('{"status": "running", "process_id": 123}', encoding="utf-8")
+    original = status.read_bytes()
+    monkeypatch.setattr("sys.argv", ["run_fresh_reproduction", "--output", str(tmp_path), "--steps", "audit"])
+    with patch.object(Workflow, "__init__", side_effect=AssertionError("must not initialize a workflow")):
+        with patch.object(Workflow, "audit_api", side_effect=RuntimeError("audit failed") if audit_fails else None,
+                          return_value={"status": "passed"}):
+            if audit_fails:
+                with pytest.raises(RuntimeError, match="audit failed"):
+                    fresh.main()
+            else:
+                fresh.main()
+    assert status.read_bytes() == original
+    assert list(tmp_path.iterdir()) == [status]
 
 
 def arguments(tmp_path):
@@ -185,14 +217,14 @@ def test_completed_generation_resumes_without_dispatch_or_changing_original_meta
 def test_followup_generation_overlaps_but_simulation_is_serial(tmp_path, monkeypatch):
     workflow = Workflow(arguments(tmp_path))
     off = workflow.api / "results" / fresh.RUNS[0]
-    manifest = {"seeds": list(range(200, 220)), "jobs": [
+    manifest = {"model": workflow.models["deepseek"], "seeds": list(range(200, 220)), "jobs": [
         {"id": f"child{i}", "context": "parent"} for i in range(360)]}
     records.write_json(off / "manifest.json", manifest)
     records.write_json(off / "holdout/child0.json", {"status": "skipped", "skip_reason": "parent_holdout_failed"})
     workflow.state["steps"]["02_deepseek_off_holdout"] = {"status": "passed"}
     for run, provider in zip(fresh.RUNS[1:], ("deepseek", "qwen", "qwen")):
         records.write_json(workflow.api / "results" / run / "manifest.json",
-                           {**manifest, "api": {"model": fresh.MODELS[provider]}})
+                           {**manifest, "api": {"model": workflow.models[provider]}})
     barrier, lock = threading.Barrier(3), threading.Lock()
     calls, generating, simulating = [], [], []
 
@@ -217,8 +249,9 @@ def test_followup_generation_overlaps_but_simulation_is_serial(tmp_path, monkeyp
 
     monkeypatch.setattr(workflow, "generate", generate)
     monkeypatch.setattr(workflow, "module", module)
-    monkeypatch.setattr(workflow, "validate_api", lambda: None)
-    workflow.api_calls()
+    with patch.object(Workflow, "audit_api", side_effect=RuntimeError("audit failed")) as audit:
+        workflow.api_calls()
+    audit.assert_not_called()
     assert len(generating) == 3
     assert all(phase != "all" for _, _, phase, _, _ in calls)
     holdout = next(row for row in calls if row[0] == "02_deepseek_off_holdout")
@@ -285,7 +318,6 @@ def test_holdout_validation_rejects_unrecovered_or_misrepresented_data(tmp_path,
 def test_plot_plan_collects_all_eight_new_data_figures_in_three_formats(tmp_path, monkeypatch):
     """Exercise the real command plan/collector without running models or renderers."""
     workflow = Workflow(arguments(tmp_path))
-    records.write_json(workflow.analysis / "VALIDATION.json", {"status": "passed"})
     commands = []
     sources = {
         "12_main_figures": ("fig2", "fig3"),
@@ -304,7 +336,7 @@ def test_plot_plan_collects_all_eight_new_data_figures_in_three_formats(tmp_path
         assert stage == "plot" and resume is False
         output = Path(command[command.index("--output-dir") + 1])
         assert output == workflow.plot / "rendered"
-        assert Path(command[command.index("--audit-dir") + 1]) == workflow.plot / "audit"
+        assert "--audit-dir" not in command
         for flag in data_arguments:
             if flag in command:
                 assert Path(command[command.index(flag) + 1]).is_relative_to(workflow.analysis)
@@ -323,9 +355,11 @@ def test_plot_plan_collects_all_eight_new_data_figures_in_three_formats(tmp_path
     assert commands == list(sources)
     report = records.read_json(workflow.plot / "FIGURES_MANIFEST.json")
     assert report["status"] == "passed" and report["new_data_only"] is True
-    assert report["models"] == {"deepseek": "deepseek-flash", "qwen": "qwen3.7-flash"}
+    assert report["models"] == workflow.models
     assert [row["figure"] for row in report["figures"]] == [f"fig{i}" for i in range(1, 9)]
     assert sum(len(row["files"]) for row in report["figures"]) == 24
+    assert not (workflow.analysis / "VALIDATION.json").exists()
+    assert not (workflow.plot / "audit").exists()
     for source, target, _ in fresh.FIGURES:
         for extension in ("png", "pdf", "svg"):
             assert (workflow.plot / f"{target}.{extension}").read_bytes() == f"new-data-{source}-{extension}".encode()

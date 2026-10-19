@@ -2,6 +2,7 @@
 import argparse
 from dataclasses import asdict
 import json
+import os
 from pathlib import Path
 import shutil
 import threading
@@ -12,14 +13,19 @@ from .core import Config, Policy
 from .records import read_json, write_json, cached_request, begin_request
 from .run import Generator, validate
 from .specificity_assets import SCORE_ARMS, generation_arms
+from ..config.load_env import require_model
 
 _LOG_LOCK = threading.Lock()
 TOKEN_LIMITS = {('deepseek', 'off'): 6000, ('deepseek', 'on'): 384000,
                 ('qwen', 'off'): 6000, ('qwen', 'on'): 131072}
 
 
-def specification(prompt, provider, mode):
-    spec = dict(provider=provider, model={'deepseek': 'deepseek-flash', 'qwen': 'qwen3.8-flash'}[provider],
+def specification(prompt, provider, mode, *, model=None):
+    """Resolve request parameters, optionally using an explicitly selected model."""
+    model = require_model(provider) if model is None else model.strip()
+    if not model:
+        raise ValueError('Explicit model must not be empty')
+    spec = dict(provider=provider, model=model,
                 prompt=prompt, temperature=1, max_tokens=TOKEN_LIMITS[provider, mode])
     spec['extra_body'] = ({'thinking': {'type': 'enabled' if mode == 'on' else 'disabled'}}
                           if provider == 'deepseek' else {'enable_thinking': mode == 'on'})
@@ -77,21 +83,93 @@ def receive_stream(stream, sink, progress):
 
 
 def _archive_failed_request(root, path, record):
-    archive = root / 'attempt_history' / f'retry_{time.time_ns()}' / 'requests_candidates'
-    archive.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(path, archive / path.name)
+    """Preserve the failed response and its partial stream before another attempt."""
+    root, path = Path(root), Path(path)
+    archive = root / 'attempt_history' / f'retry_{time.time_ns()}'
+    sources = [('requests_candidates', path),
+               ('streams', root / 'streams' / (path.stem + '.jsonl')),
+               ('request_progress', root / 'request_progress' / path.name)]
+    for folder, source in sources:
+        if source.exists():
+            destination = archive / folder / source.name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
     path.unlink()
 
 
-def streamed_program(root, job, spec, cfg, require_reasoning, api_retries=3):
+def retry_after_seconds(value, now=None):
+    """Accept bounded Retry-After seconds or an HTTP date; ignore invalid values."""
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        from datetime import timezone
+        from email.utils import parsedate_to_datetime
+        try:
+            date = parsedate_to_datetime(str(value))
+            if date.tzinfo is None:
+                date = date.replace(tzinfo=timezone.utc)
+            seconds = date.timestamp() - (time.time() if now is None else now)
+        except (TypeError, ValueError, OverflowError):
+            return None
+    return seconds if 0 <= seconds <= 3600 else None
+
+
+def provider_failure_metadata(exc, secret):
+    """Whitelist provider diagnostics and Retry-After, redacting the API key."""
+    def redact(value):
+        if isinstance(value, str):
+            return (value.replace(secret, '[REDACTED]') if secret else value)[:2000]
+        return value if value is None or isinstance(value, (bool, int, float)) else None
+
+    result = {}
+    body = getattr(exc, 'body', None)
+    if isinstance(body, dict):
+        error = body['error'] if isinstance(body.get('error'), dict) else body
+        result['provider_error'] = {name: redact(error.get(name)) for name in ('type', 'code', 'message')}
+    headers = getattr(getattr(exc, 'response', None), 'headers', {}) or {}
+    retry_after = headers.get('retry-after') or headers.get('Retry-After')
+    if retry_after is not None:
+        result['retry_after'] = redact(str(retry_after))
+        result['retry_after_seconds'] = retry_after_seconds(retry_after)
+    return result
+
+
+def streamed_program(root, job, spec, cfg, api_retries=3):
+    import httpx
+    import random
+
+    def retryable_status(status):
+        return status in (408, 409, 429) or isinstance(status, int) and status >= 500
+
+    def transport_failure(exc):
+        seen = set()
+        while exc is not None and id(exc) not in seen:
+            seen.add(id(exc))
+            if isinstance(exc, httpx.TransportError):
+                return True
+            exc = exc.__cause__ if exc.__cause__ is not None else (None if exc.__suppress_context__ else exc.__context__)
+        return False
+
     path = root / 'requests_candidates' / (job['id'] + '.json')
     record = cached_request(path, spec, retry_failed=True)
     if record is not None and record.get('status') == 'api_error':
+        saved_transport = any(isinstance(error_class := getattr(httpx, item.get('type', ''), None), type)
+                              and issubclass(error_class, httpx.TransportError)
+                              for item in record.get('exception_chain', []))
+        if not (retryable_status(record.get('http_status')) or saved_transport):
+            raise RuntimeError('Saved request is not a confirmed retryable failure; inspect ' + job['id'])
+        if record.get('http_status') == 429:
+            finished = record.get('finished_at')
+            elapsed = max(0., time.time() - finished) if isinstance(finished, (int, float)) else 0.
+            wait = max(60., retry_after_seconds(record.get('retry_after_seconds')) or 0.) - elapsed
+            if wait > 0:
+                time.sleep(wait + random.uniform(0., 1.))
         _archive_failed_request(root, path, record)
         record = None
     if record is None:
         from openai import OpenAI
-        import httpx
         from ..config.load_env import get_api_key, get_base_url
         key = get_api_key(spec['provider'])
         if not key:
@@ -100,17 +178,27 @@ def streamed_program(root, job, spec, cfg, require_reasoning, api_retries=3):
         events.parent.mkdir(exist_ok=True)
         if events.exists():
             events.unlink()
+        progress_path = root / 'request_progress' / (job['id'] + '.json')
+        if progress_path.exists():
+            progress_path.unlink()
 
         def progress(chars):
             write_json(root / 'request_progress' / (job['id'] + '.json'),
                        {'id': job['id'], 'characters_received': chars, 'updated_at': time.time()})
 
+        direct = os.environ.get('DIRECT_RECIPROCITY_API_DIRECT') == '1'
+        timeout = httpx.Timeout(3600, connect=30)
+        client_options = {'timeout': timeout}
+        if direct:
+            client_options['http_client'] = httpx.Client(trust_env=False, timeout=timeout)
         with OpenAI(api_key=key, base_url=get_base_url(spec['provider']), max_retries=0,
-                    timeout=httpx.Timeout(3600, connect=30)) as client:
+                    **client_options) as client:
             request = {k: v for k, v in spec.items() if k not in ('provider', 'prompt')}
             request['messages'] = [{'role': 'user', 'content': spec['prompt']}]
             for attempt in range(api_retries + 1):
                 record = begin_request(path, spec)
+                record['transport'] = {'direct': direct, 'trust_env': not direct}
+                write_json(path, record)
                 if events.exists():
                     events.unlink()
                 with events.open('x', encoding='utf-8') as sink:
@@ -129,24 +217,26 @@ def streamed_program(root, job, spec, cfg, require_reasoning, api_retries=3):
                     except Exception as exc:
                         error = {'error_type': type(exc).__name__, 'http_status': getattr(exc, 'status_code', None),
                                  'exception_chain': transport_diagnostics(exc, key)}
-                        body = getattr(exc, 'body', None)
-                        if isinstance(body, dict) and isinstance(body.get('error'), dict):
-                            error['provider_error'] = {k: body['error'].get(k) for k in ('type', 'code', 'message')}
+                        error.update(provider_failure_metadata(exc, key))
                         record.update(error, status='api_error', finished_at=time.time())
                         write_json(path, record)
                         http_status = getattr(exc, 'status_code', None)
-                        retryable = (isinstance(exc, httpx.TransportError)
-                                     or http_status in (408, 409, 429)
-                                     or isinstance(http_status, int) and http_status >= 500)
+                        retryable = transport_failure(exc) or retryable_status(http_status)
                         if not retryable or attempt >= api_retries:
                             raise RuntimeError('Request failed; saved metadata for ' + job['id']) from None
+                        delay = min(60., 2. * 2 ** min(attempt, 5))
+                        if http_status == 429:
+                            delay = max(60., record.get('retry_after_seconds') or 0.)
+                        delay += random.uniform(0., 1.)
+                        record.update(retry_delay_seconds=delay, retry_number=attempt + 1)
+                        write_json(path, record)
+                        sink.close()
                         _archive_failed_request(root, path, record)
                         if events.exists():
                             events.unlink()
-    if require_reasoning and not record.get('reasoning_content'):
-        raise RuntimeError('No native reasoning evidence; stop dispatch and inspect ' + job['id'])
-    if record.get('returned_model') != spec['model']:
-        raise RuntimeError('Unexpected returned model; inspect before continuing')
+                        if progress_path.exists():
+                            progress_path.unlink()
+                        time.sleep(delay)
     policy = validate(record, job['id'], cfg)
     write_json(path, record)
     return policy
@@ -201,7 +291,7 @@ def write_arm_logs(root, manifest, arm=None):
     return paths
 
 
-def generate_candidate(root, job, arm, *, provider='deepseek', mode='off', api_retries=3):
+def generate_candidate(root, job, arm, *, provider='deepseek', mode='off', model=None, api_retries=3):
     """All models share the same condition parameter, candidate record and log path."""
     if arm not in SCORE_ARMS or job['arm'] != arm:
         raise ValueError('Candidate information condition differs from task')
@@ -210,7 +300,7 @@ def generate_candidate(root, job, arm, *, provider='deepseek', mode='off', api_r
     try:
         context = read_json(root / 'contexts' / (job['context'] + '.json'))
         cfg = Config(seed=job['seed'])
-        spec = specification(context['prompts'][arm], provider, mode)
+        spec = specification(context['prompts'][arm], provider, mode, model=model)
         if out.exists():
             saved = read_json(out)
             request = cached_request(root / 'requests_candidates' / (job['id'] + '.json'), spec)
@@ -222,8 +312,7 @@ def generate_candidate(root, job, arm, *, provider='deepseek', mode='off', api_r
             generator = Generator(root / 'requests_candidates', provider, spec['model'], cfg.temperature)
             policy = generator.generate(job['id'], spec['prompt'], cfg)
         else:
-            policy = streamed_program(root, job, spec, cfg, require_reasoning=mode == 'on',
-                                      api_retries=api_retries)
+            policy = streamed_program(root, job, spec, cfg, api_retries=api_retries)
         write_json(out, {**job, 'child': asdict(policy) if policy else None,
                         'parent_key': Policy(**context['parent']).key, 'valid': policy is not None})
         record = read_json(root / 'requests_candidates' / (job['id'] + '.json'))
@@ -234,9 +323,9 @@ def generate_candidate(root, job, arm, *, provider='deepseek', mode='off', api_r
         append_data_log(root, job)
 
 
-def candidate_job(arg, *, provider='deepseek', mode='off', api_retries=3):
+def candidate_job(arg, *, provider='deepseek', mode='off', model=None, api_retries=3):
     root, job = arg
-    return generate_candidate(root, job, job['arm'], provider=provider, mode=mode,
+    return generate_candidate(root, job, job['arm'], provider=provider, mode=mode, model=model,
                               api_retries=api_retries)
 
 

@@ -192,7 +192,8 @@ class MatrixDiagnosticsTests(unittest.TestCase):
             for name in ('initial-0','g001-child000','g002-child000'):
                 write_json(Path(temp)/(name+'.json'),{'status':'valid','usage':{'total_tokens':10}})
             self.assertEqual(request_budget([temp],0)['requests'],1)
-            self.assertEqual(request_budget([temp],1)['total_tokens'],20)
+            self.assertEqual(request_budget([temp],1),
+                             {'requests':2,'valid':2,'invalid':0,'api_errors':0})
 
     def test_behavior_profile_depends_on_actions_not_source(self):
         from experiments.direct_reciprocity.diagnostics import behavior_profile

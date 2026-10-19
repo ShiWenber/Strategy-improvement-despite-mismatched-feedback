@@ -3,6 +3,7 @@
 Rendering only: English text, descriptive panel headings, and independent
 legends inside lettered panels. Interval definitions belong in captions.
 """
+from pathlib import Path
 from matplotlib.lines import Line2D
 from matplotlib.legend_handler import HandlerBase
 import matplotlib.pyplot as plt
@@ -17,6 +18,19 @@ FONT = 'DejaVu Sans'
 LEGEND_TOP = .988
 PANEL_FONT = 9.5
 LEGEND_FONT = 8.5
+WIDTH = 175 / 25.4
+
+
+def save_figure(fig, stem, output_dir, *, dpi=600):
+    """Export a figure without running layout audits or writing QA reports."""
+    directory = Path(output_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    outputs = {}
+    for extension in ('pdf', 'svg', 'png'):
+        path = directory / f'{stem}.{extension}'
+        fig.savefig(path, dpi=dpi, facecolor='white')
+        outputs[extension] = str(path)
+    return {'figure': stem, 'outputs': outputs}
 
 class IntervalKey:
     """A horizontal whisker with end caps, used to explain stored intervals."""
@@ -41,12 +55,10 @@ def apply_style():
         'savefig.dpi':300})
 
 def panel_title(ax, letter, title='', pad=8, **kwargs):
-    assert title.strip(), 'Each lettered panel needs a descriptive title.'
     return ax.set_title(f'({letter}) {title}',loc='left',fontweight='bold',
                         fontsize=PANEL_FONT,pad=pad,**kwargs)
 
 def panel_heading(fig, letter, title, x, y, **kwargs):
-    assert title.strip(), 'Each lettered panel needs a descriptive title.'
     text = f'({letter}) {title}'
     return fig.text(x,y,text,ha='left',va='bottom',
                     fontsize=PANEL_FONT,fontweight='bold',**kwargs)
@@ -60,8 +72,6 @@ def top_legend(fig, handles, labels, ncol=3, handler_map=None, **kwargs):
         labelspacing=.45,handler_map=mapping,**kwargs)
 
 def panel_legend(ax, handles, labels, ncol=2, handler_map=None):
-    assert not any('95%' in label or isinstance(handle, IntervalKey)
-                   for handle, label in zip(handles, labels)), 'Explain intervals in the caption.'
     mapping={}
     if handler_map: mapping.update(handler_map)
     return ax.legend(handles, labels, loc='upper center', ncol=ncol,

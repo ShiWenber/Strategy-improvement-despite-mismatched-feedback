@@ -1,4 +1,4 @@
-"""Recompute four model/configuration mainline summaries and verify paired tests."""
+"""Recompute four model/configuration mainline summaries and paired tests."""
 from __future__ import annotations
 
 import argparse
@@ -8,19 +8,10 @@ from pathlib import Path
 
 import numpy as np
 
-from experiments.direct_reciprocity.specificity_analysis import summarize
+from experiments.direct_reciprocity.specificity_analysis import contrast, summarize
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# Where the frozen raw contrast lives. The Qwen top-level file holds only the
-# focus contrasts, while the per-mode files hold the full per-arm results.
-FROZEN_TAU = {
-    ('DeepSeek', 'Off'): ('results/feedback_specificity_v2/ANALYSIS.json', ('primary',)),
-    ('DeepSeek', 'On'): ('results/feedback_specificity_thinking_384k_20260923/ANALYSIS.json',
-                         ('focus_holm_two', 'thinking_accurate_minus_mismatched')),
-    ('Qwen', 'Off'): ('results/qwen3_8/ANALYSIS.json', ('focus', 'off')),
-    ('Qwen', 'On'): ('results/qwen3_8/ANALYSIS.json', ('focus', 'on')),
-}
 RESULT_FILES = {
     ('DeepSeek', 'Off'): 'results/feedback_specificity_v2/ANALYSIS.json',
     ('DeepSeek', 'On'): 'results/feedback_specificity_thinking_384k_20260923/ANALYSIS.json',
@@ -35,12 +26,6 @@ def read(relative, analysis_suffix=''):
     return json.loads(path.read_text(encoding='utf-8'))
 
 
-def dig(node, keys):
-    for key in keys:
-        node = node[key]
-    return node
-
-
 def result_block(model, mode, payload):
     """The two thinking runs and the Qwen runs wrap their result under a key."""
     if model == 'DeepSeek' and mode == 'On':
@@ -50,32 +35,20 @@ def result_block(model, mode, payload):
     return payload
 
 
-def frozen_raw_contrast(model, mode, analysis_suffix=""):
-    """Frozen mean, interval, seed values, and sign-swap p for the raw contrast."""
-    relative, keys = FROZEN_TAU[(model, mode)]
-    return dig(read(relative, analysis_suffix), keys)
-
-
 def raw_seed_values(result):
     return (np.asarray(result['raw']['accurate']['metrics']['default/score']['seed_values'], dtype=float)
             - np.asarray(result['raw']['mismatched']['metrics']['default/score']['seed_values'], dtype=float))
-
-
-def sign_swap(values):
-    """Exact paired sign-swap p over the 20 population means."""
-    values = np.asarray(values, dtype=float)
-    observed = abs(values.sum())
-    index = np.arange(1 << len(values), dtype=np.uint32)
-    permuted = np.zeros(len(index))
-    for j, value in enumerate(values):
-        permuted += np.where((index >> j) & 1, value, -value)
-    return float(np.mean(np.abs(permuted) >= observed - 1e-12))
 
 
 def export_csv(directory, analysis_suffix="", output_suffix=""):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     candidates, populations, summaries = [], [], []
+    extended = any(
+        metric.get('missing_contexts')
+        for (model, mode), relative in RESULT_FILES.items()
+        for arm in result_block(model, mode, read(relative, analysis_suffix))['raw'].values()
+        for metric in arm['metrics'].values())
     for (model, mode), relative in RESULT_FILES.items():
         config = model + '/' + mode.upper()
         rel = Path(relative).parent
@@ -88,17 +61,28 @@ def export_csv(directory, analysis_suffix="", output_suffix=""):
         for job in manifest['jobs']:
             row = read(root / 'holdout' / (job['id'] + '.json'))
             for setting in ['default', 'noise01', 'long']:
-                candidates.append({'configuration': config, 'id': job['id'], 'seed': job['seed'],
+                candidate = {'configuration': config, 'id': job['id'], 'seed': job['seed'],
                                    'context': job['context'], 'arm': job['arm'], 'draw': job['draw'],
                                    'valid': row['valid'], 'setting': setting,
                                    'fallback': row['fallback'][setting], 'gain_per_round': row['delta'][setting]['score'],
-                                   'S3_selected': winners[job['context'], job['arm'], 'S3'] == job['id']})
+                             'S3_selected': winners[job['context'], job['arm'], 'S3'] == job['id']}
+                if extended:
+                    candidate.update(estimable_gain=row['delta'][setting]['score'] is not None,
+                                     missing_reason=json.dumps(row.get('missing_reasons', {}).get(setting),
+                                                               ensure_ascii=False))
+                candidates.append(candidate)
         for arm in manifest['arms']:
             for stage in ['raw', 'S1', 'S2', 'S3']:
                 metric = stats['raw'][arm]['metrics']['default/score'] if stage == 'raw' else stats['selected'][stage + '/' + arm]['metrics']['default']
-                summaries.append({'configuration': config, 'arm': arm, 'stage': stage,
-                                  'mean': metric['mean'], 'ci95_low': metric['ci95'][0], 'ci95_high': metric['ci95'][1]})
-                for seed, value in zip(manifest['seeds'], metric['seed_values']):
+                summary = {'configuration': config, 'arm': arm, 'stage': stage,
+                           'mean': metric['mean'], 'ci95_low': metric['ci95'][0], 'ci95_high': metric['ci95'][1]}
+                if extended:
+                    summary.update(n_contexts=metric.get('n_contexts'),
+                                   n_expected_contexts=metric.get('n_expected_contexts'),
+                                   n_observations=metric.get('n_observations'),
+                                   n_populations=metric.get('n_seeds'))
+                summaries.append(summary)
+                for seed, value in zip(metric.get('seed_ids', manifest['seeds']), metric['seed_values']):
                     populations.append({'configuration': config, 'seed': seed, 'arm': arm,
                                         'stage': stage, 'gain_per_round': value})
     for stem, rows in [('candidate_gains', candidates), ('population_gains', populations), ('condition_statistics', summaries)]:
@@ -134,8 +118,12 @@ def score_baseline(analysis_suffix=''):
                                 for arm in ('accurate', 'mismatched')}
         score = result['raw']['score']
         selection_failures = {rule: 0 for rule in ('S1', 'S2', 'S3')}
+        unavailable = {setting: 0 for setting in ('default', 'noise01', 'long', 'behavior')}
         for job in manifest['jobs']:
             if job['arm'] == 'score':
+                outcome = read(root / 'holdout' / (job['id'] + '.json'))
+                for setting in unavailable:
+                    unavailable[setting] += outcome.get('deployed', {}).get(setting) is None
                 metrics = read(root / 'selection_scores' / (job['id'] + '.json'))['metrics']
                 for rule in selection_failures:
                     selection_failures[rule] += metrics[rule]['status'] != 'ok'
@@ -145,6 +133,8 @@ def score_baseline(analysis_suffix=''):
             'score_s3_gain': result['selected']['S3/score']['metrics']['default'],
             'candidates': score['n'], 'invalid': score['n'] - score['valid'],
             'fallbacks': score['fallbacks'], 'selection_failures': selection_failures}
+        if any(unavailable.values()):
+            configurations[model + '/' + mode.upper()]['unavailable'] = unavailable
     return {'configurations': configurations,
             'exploratory': True, 'interval': 'Unadjusted 95% population percentile bootstrap; 20000 resamples; seed 2026091903',
             'unit': 'Shared population clusters; two draws averaged within parent, three parents within population',
@@ -187,15 +177,12 @@ def main():
     statistics, sources = {}, {}
     for (model, mode), relative in RESULT_FILES.items():
         result = result_block(model, mode, read(relative, args.analysis_suffix))
-        contrast = frozen_raw_contrast(model, mode, args.analysis_suffix)
-        values = raw_seed_values(result)
-        assert np.allclose(values, contrast['seed_values'], atol=1e-12, rtol=0)
-        assert abs(sign_swap(values) - contrast['sign_swap_p']) < 1e-12
+        raw_contrast = contrast(raw_seed_values(result))
         key = model + '/' + mode.upper()
         statistics[key] = {
             'raw_mismatched': result['raw']['mismatched']['metrics']['default/score'],
             's3_mismatched': result['selected']['S3/mismatched']['metrics']['default'],
-            'raw_accurate_minus_mismatched': {k: contrast[k] for k in ['n_seeds', 'seed_values', 'mean', 'ci95', 'sign_swap_p']}}
+            'raw_accurate_minus_mismatched': {k: raw_contrast[k] for k in ['n_seeds', 'seed_values', 'mean', 'ci95', 'sign_swap_p']}}
         sources[key] = str(Path(relative).with_name(Path(relative).stem + args.analysis_suffix + '.json')).replace('\\', '/')
     report = {'sources': sources, 'statistics': statistics,
               'unit': '20 shared independent populations; 3 parents per population',

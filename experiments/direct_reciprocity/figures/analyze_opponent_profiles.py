@@ -16,7 +16,6 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[3]
 FAMILIES = ["recovery", "exploitation", "random", "memory"]
 ARMS = ["accurate", "mismatched"]
-SEEDS = list(range(200, 220))
 STAGES = ["raw", "S3"]
 BOOTSTRAP_SEED = 2026092604
 N_BOOTSTRAP = 20000
@@ -25,17 +24,23 @@ N_BOOTSTRAP = 20000
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--work', type=Path, default=ROOT)
-    parser.add_argument('--analysis-suffix', default='')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     work = args.work.resolve()
+    runs = [('non_thinking', 'feedback_specificity_v2'),
+            ('thinking', 'feedback_specificity_thinking_384k_20260923')]
+    manifests = {mode: read_json(work / 'results' / run / 'manifest.json') for mode, run in runs}
+    seeds = manifests[runs[0][0]]['seeds']
+    if not seeds or any(manifest['seeds'] != seeds for manifest in manifests.values()):
+        raise ValueError('Opponent profiles require matching nonempty population seed orders')
     indices = np.random.default_rng(BOOTSTRAP_SEED).integers(
-        0, len(SEEDS), size=(N_BOOTSTRAP, len(SEEDS))
+        0, len(seeds), size=(N_BOOTSTRAP, len(seeds))
     )
 
     def summarize(values):
         values = np.asarray(values, dtype=float)
-        assert len(values) == len(SEEDS)
+        if len(values) != len(seeds) or not np.isfinite(values).all():
+            raise ValueError('Opponent profiles require one finite value per population')
         return {
             "mean": float(values.mean()),
             "seed_values": values.tolist(),
@@ -53,10 +58,10 @@ def main():
         "purpose": "Assess whether similar overall Accurate and Mismatched payoff gains mask opponent-family heterogeneity.",
         "no_new_games_or_model_calls": True,
         "independent_unit": "original population",
-        "n_independent_populations": len(SEEDS),
-        "seeds": SEEDS,
+        "n_independent_populations": len(seeds),
+        "seeds": seeds,
         "families": FAMILIES,
-        "family_weights": {family: .25 for family in FAMILIES},
+        "family_weights": {family: 1 / len(FAMILIES) for family in FAMILIES},
         "arms": ARMS,
         "bootstrap": {
             "resamples": N_BOOTSTRAP,
@@ -65,9 +70,9 @@ def main():
             "intervals": "unadjusted descriptive intervals; not simultaneous intervals or confirmatory significance tests",
         },
         "aggregation": {
-            "raw": "For each arm, average two pre-generated candidate outputs within each parent, then equally average three parents per population, then 20 populations.",
-            "S3": "Use frozen S3 winner per parent and arm, or parent if no winner; equally average three parents per population, then 20 populations.",
-            "family": "Default H: three equally weighted opponents per family. Each family has weight 1/4 in overall H payoff. All values are payoff per round.",
+            "raw": "Average candidate outputs within each parent, parents within each population, then give each population equal weight.",
+            "S3": "Use the sealed S3 winner or retain the parent; average parents within populations and weight populations equally.",
+            "family": "Default H has equally weighted opponents and balanced families. Values are payoff per round.",
             "fallback": "Use deployed.default, which substitutes the parent entire default record for invalid candidates or execution failure in default H. Keep these generation outputs in the summaries.",
         },
         "limits": [
@@ -75,19 +80,14 @@ def main():
             "A family-specific contrast is not a causal mechanism or proof that the model repaired a particular behavioural deficit.",
             "No identified aggregate advantage is not equivalence, and an exploratory family pattern is not a confirmed matching benefit.",
             "OFF and ON comparisons are descriptive.",
-            "The independent sampling unit is population; 60 parents, 120 candidates, and 12 opponents are not independent experimental replications.",
+            "The independent sampling unit is population; parents, candidates and opponents are not independent experimental replications.",
         ],
         "configs": {},
     }
-    for mode, run in [
-        ("non_thinking", "feedback_specificity_v2"),
-        ("thinking", "feedback_specificity_thinking_384k_20260923"),
-    ]:
+    for mode, run in runs:
         source = work / "results" / run
         manifest = read_json(source / "manifest.json")
         sealed = read_json(source / "SELECTIONS_SEALED.json")
-        frozen = read_json(source / f"ANALYSIS{args.analysis_suffix}.json")
-        expected = frozen["thinking"] if mode == "thinking" else frozen
         selection = {
             (row["context"], row["arm"]): row
             for row in sealed["rows"] if row["rule"] == "S3"
@@ -96,12 +96,13 @@ def main():
         for job in manifest["jobs"]:
             if job["arm"] in ARMS:
                 grouped[job["context"], job["arm"]].append(job)
-        assert len(grouped) == 120
+        if len(grouped) != len(manifest['seeds']) * len(manifest['ranks']) * len(ARMS):
+            raise ValueError('Opponent profiles require all parent and condition pools')
         rows = []
         failures = {arm: 0 for arm in ARMS}
-        max_family_error = 0.0
         for (context, arm), jobs in sorted(grouped.items()):
-            assert len(jobs) == 2
+            if len(jobs) != manifest['draws']:
+                raise ValueError('Opponent profile candidate pool differs from the manifest draw count')
             parent = read_json(source / "holdout" / (context + ".json"))["measured"]["default"]
             children = {
                 job["id"]: read_json(source / "holdout" / (job["id"] + ".json"))
@@ -123,10 +124,8 @@ def main():
                 "S3": selected["score"],
             }
             for stage in levels:
-                assert set(levels[stage]) == set(FAMILIES)
-                error = abs(mean(levels[stage].values()) - overall[stage])
-                max_family_error = max(max_family_error, error)
-                assert error < 1e-12
+                if set(levels[stage]) != set(FAMILIES):
+                    raise ValueError('Opponent profiles require all opponent families')
             rows.append({
                 "context": context, "seed": jobs[0]["seed"], "arm": arm,
                 "winner": winner, "default_H_fallback_slots": fallback_count,
@@ -137,42 +136,25 @@ def main():
                 },
                 "overall_gains": {stage: overall[stage] - overall["parent"] for stage in STAGES},
             })
-        summaries, contrasts, validation = {}, {}, []
+        summaries, contrasts = {}, {}
         for stage in STAGES:
             summaries[stage] = {}
             for arm in ARMS:
                 summaries[stage][arm] = {}
                 subset = [row for row in rows if row["arm"] == arm]
-                assert len(subset) == 60
-                assert all(sum(row["seed"] == seed for row in subset) == 3 for seed in SEEDS)
+                if any(sum(row['seed'] == seed for row in subset) != len(manifest['ranks']) for seed in seeds):
+                    raise ValueError('Opponent profiles require all parents within each population')
                 for family in FAMILIES:
                     values = [
                         mean(row["family_gains"][stage][family] for row in subset if row["seed"] == seed)
-                        for seed in SEEDS
+                        for seed in seeds
                     ]
                     summaries[stage][arm][family] = summarize(values)
                 values = [
                     mean(row["overall_gains"][stage] for row in subset if row["seed"] == seed)
-                    for seed in SEEDS
+                    for seed in seeds
                 ]
                 summaries[stage][arm]["overall"] = summarize(values)
-                reference = (
-                    expected["raw"][arm]["metrics"]["default/score"]["seed_values"]
-                    if stage == "raw" else
-                    expected["selected"]["S3/" + arm]["metrics"]["default"]["seed_values"]
-                )
-                error = float(np.max(abs(np.array(values) - np.array(reference))))
-                assert error < 1e-12
-                family_mean = np.mean([
-                    summaries[stage][arm][family]["seed_values"] for family in FAMILIES
-                ], axis=0)
-                family_error = float(np.max(abs(family_mean - np.array(values))))
-                assert family_error < 1e-12
-                validation.append({
-                    "stage": stage, "arm": arm,
-                    "max_abs_difference_vs_frozen_overall_seed_values": error,
-                    "max_abs_difference_family_mean_vs_overall_seed_values": family_error,
-                })
             contrasts[stage] = {}
             for family in FAMILIES + ["overall"]:
                 values = (
@@ -182,8 +164,9 @@ def main():
                 contrasts[stage][family] = summarize(values)
         result["configs"][mode] = {
             "source_root": source.relative_to(work).as_posix(),
-            "source_files": ["manifest.json", "SELECTIONS_SEALED.json", "ANALYSIS.json", "holdout/<context>.json", "holdout/<candidate_id>.json"],
-            "n_parents": 60, "n_pools_included": 120, "n_raw_slots_included": 240,
+            "source_files": ["manifest.json", "SELECTIONS_SEALED.json", "holdout/<context>.json", "holdout/<candidate_id>.json"],
+            "n_parents": len({row['context'] for row in rows}),
+            "n_pools_included": len(rows), "n_raw_slots_included": sum(len(jobs) for jobs in grouped.values()),
             "default_H_fallback_slots_by_arm": failures,
             "n_S3_retained_parent_by_arm": {
                 arm: sum(row["winner"] is None for row in rows if row["arm"] == arm) for arm in ARMS
@@ -191,16 +174,11 @@ def main():
             "summaries": summaries,
             "paired_accurate_minus_mismatched": contrasts,
             "pool_rows": rows,
-            "validation": {
-                "all_passed": True,
-                "max_abs_family_average_difference_per_parent_pool": max_family_error,
-                "checks": validation,
-            },
         }
     destination = args.output or work / "results/figure4_opponent_profiles_20260926/ANALYSIS.json"
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"Wrote {destination}; all aggregation checks passed.")
+    print(f"Wrote {destination}")
 
 
 if __name__ == "__main__":

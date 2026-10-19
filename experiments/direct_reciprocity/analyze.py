@@ -40,8 +40,7 @@ def summarize(root):
                  'code_diversity':state['code_diversity'],
                  'behavior_diversity':state['behavior_diagnostics']['distinct_valid_profiles'],
                  'behavior_errors':len(state['behavior_diagnostics']['profile_errors']),
-                 'requests':state['budget_at_evaluation']['requests'],
-                 'tokens':state['budget_at_evaluation']['total_tokens']}
+                 'requests':state['budget_at_evaluation']['requests']}
         for label,result in state['holdout'].items():
             rounds=state['test_configs'][label]['rounds']
             metrics[label+'_runtime_failure']=result.get('status')=='runtime_failure'
@@ -61,8 +60,7 @@ def summarize(root):
                           'score_mean':mean(values) if values else None,'score_sd':stdev(values) if len(values)>1 else None,
                           'score_bootstrap95':interval(values),
                           'cooperation_mean':mean(r['default_cooperation'] for r in successful) if successful else None,
-                          'request_mean':mean(r['requests'] for r in records),
-                          'token_mean':mean(r['tokens'] for r in records)})
+                          'request_mean':mean(r['requests'] for r in records)})
     contrasts=[]
     for selection in ('paper_truncation',):
         reference={r['seed']:r for r in groups['minimal',selection]}

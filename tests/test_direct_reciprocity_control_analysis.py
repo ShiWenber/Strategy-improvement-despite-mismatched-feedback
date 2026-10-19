@@ -4,9 +4,23 @@ from pathlib import Path
 from experiments.direct_reciprocity.core import Policy
 from experiments.direct_reciprocity.records import write_json, read_json
 from experiments.direct_reciprocity.analyze_control import summarize_controls
+from experiments.direct_reciprocity.role_analysis import policies
 
 
 class ControlAnalysisTests(unittest.TestCase):
+    def test_policy_contrasts_handle_gate_validity_ties_and_decomposition(self):
+        self.assertEqual(policies([.2, -.4], [1, 1], 1, [True, True])['B'], 0)
+        self.assertEqual(policies([.2, -.4], [3, 2], 1, [False, True])['winner'], 1)
+        result = policies([.2, -.4], [3, 2], 1, [True, True])
+        self.assertEqual(result['winner'], 0)
+        self.assertAlmostEqual(result['ranking'], .3)
+        self.assertEqual(policies([.2, -.4], [2, 2], 1, [True, True])['winner'], 0)
+        result = policies([.2, -.4], [2, 0], 1, [True, True])
+        self.assertEqual((result['G'], result['U'], result['ranking']), (.1, .2, 0))
+        for scores in ([0, 0], [2, 0], [0, 2], [2, 3]):
+            result = policies([-.3, .2], scores, 1, [True, True])
+            self.assertAlmostEqual(result['gate'] + result['opportunity'] + result['ranking'], result['total'])
+
     def test_budget_and_winner_are_audited_and_missing_is_not_complete(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

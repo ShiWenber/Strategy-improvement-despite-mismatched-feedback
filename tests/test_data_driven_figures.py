@@ -1,7 +1,7 @@
 """Renderers must follow new inputs rather than the paper's observed outcomes."""
 import copy
 import json
-from types import SimpleNamespace
+import sys
 
 import matplotlib
 matplotlib.use('Agg')
@@ -126,6 +126,45 @@ def test_main_opponent_and_behavior_axes_follow_input_intervals(tmp_path, monkey
     assert_intervals_visible(fig)
 
 
+@pytest.mark.parametrize('figure', ['2', '3'])
+def test_single_main_figure_does_not_require_unrelated_reports(tmp_path, monkeypatch, figure):
+    source_fixture(tmp_path, monkeypatch, 3)
+    paths = main.INPUTS
+    keys = {'opponents', 'behavior'}
+    if figure == '2':
+        keys = set(paths) - keys
+    monkeypatch.setattr(main, 'INPUTS', {key: paths[key] for key in keys})
+
+    cross, pairs, opponents, behavior = main.load(figure)
+
+    if figure == '2':
+        assert set(cross) == set(pairs) == set(main.ORDER)
+        assert opponents == behavior == {}
+    else:
+        assert cross == pairs == {}
+        assert opponents['families'] == ['recovery', 'random']
+        assert set(behavior['configs']) == {'non_thinking', 'thinking'}
+
+
+@pytest.mark.parametrize('figure, flag, maker', [
+    (4, '--off-analysis', 'make_figure4'),
+    (5, '--off-role-analysis', 'make_figure5'),
+])
+def test_single_camera_figure_loads_only_its_report(tmp_path, monkeypatch, capsys, figure, flag, maker):
+    report = {'new_report': maker}
+    path = tmp_path / 'analysis.json'
+    path.write_text(json.dumps(report), encoding='utf-8')
+    captured = []
+    monkeypatch.setattr(camera, maker, captured.append)
+    monkeypatch.setattr(sys, 'argv', ['camera', '--figures', str(figure),
+                                    flag, str(path), '--output-dir', str(tmp_path / 'plots')])
+
+    camera.main()
+
+    assert captured == [report]
+    assert json.loads(capsys.readouterr().out) == []
+
+
 def test_supplementary_opponent_axes_follow_the_input(tmp_path, monkeypatch):
     _, _, opponents, _ = source_fixture(tmp_path, monkeypatch, 3)
     fig = opponent_figure(opponents)
@@ -148,7 +187,7 @@ def test_density_display_uses_all_observations_without_a_fixed_range(values):
 
 def test_distribution_includes_equal_payoffs_and_actual_pool_counts(tmp_path, monkeypatch):
     captured = []
-    monkeypatch.setattr(distribution, 'render_audit', lambda fig, *args, **kwargs: captured.append(fig) or {})
+    monkeypatch.setattr(distribution, 'save_figure', lambda fig, *args, **kwargs: captured.append(fig) or {})
     pop = {}
     for index, mode in enumerate(distribution.MODES):
         counts = {'s3_retained_parent': 1, 's3_accepted_test_better': 1,
@@ -156,9 +195,7 @@ def test_distribution_includes_equal_payoffs_and_actual_pool_counts(tmp_path, mo
         pools = sum(counts.values())
         pop[mode] = {**counts, 'n': pools * 2, 'all_raw_gains': list(np.linspace(-3, 4, pools * 2)),
                      's3_accepted': pools - counts['s3_retained_parent']}
-    args = SimpleNamespace(input=tmp_path / 'input.json', display_output=tmp_path / 'display.json',
-                           output_dir=tmp_path, audit_dir=tmp_path)
-    distribution.generation_figure(pop, distribution.build_display(pop), args)
+    distribution.generation_figure(pop, distribution.build_display(pop), tmp_path)
     fig, = captured
     ax = fig.axes[1]
     assert 'Selected: H = 0' in [text.get_text() for text in ax.get_legend().get_texts()]

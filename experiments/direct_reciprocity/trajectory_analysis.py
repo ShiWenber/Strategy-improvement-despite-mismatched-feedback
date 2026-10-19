@@ -34,7 +34,7 @@ def analyze_trajectories(root):
                 continue
             budget = state['budget_at_evaluation']
             row = {'generation': state['generation'], 'requests': budget['requests'],
-                   'tokens': budget['total_tokens'], 'valid_requests': budget['valid'],
+                   'valid_requests': budget['valid'],
                    'train_fitness_per_round': max(r['fitness'] for r in state['assessment'])/plan['rounds'],
                    'code_diversity': state['code_diversity'],
                    'behavior_diversity': state['behavior_diagnostics']['distinct_valid_profiles']}

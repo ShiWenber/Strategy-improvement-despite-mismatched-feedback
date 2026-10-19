@@ -1,7 +1,38 @@
 import unittest
+from dataclasses import asdict
 from unittest.mock import patch
+
+import pytest
+
 from experiments.direct_reciprocity.core import Config, Policy, PolicyError
+from experiments.direct_reciprocity import recover_evaluation as recovery
+from experiments.direct_reciprocity.records import write_json
 from experiments.direct_reciprocity.recover_evaluation import tolerate_holdout_failure
+
+
+@pytest.mark.parametrize('old_report', [None, 'outdated recovery report'])
+def test_recovery_does_not_depend_on_previous_recovery_report(tmp_path, old_report):
+    cfg = Config(seed=7)
+    write_json(tmp_path / 'config.json', {
+        'config': asdict(cfg), 'provider': 'offline', 'model': 'fixture', 'initial_source': None})
+    report = tmp_path / 'evaluation_recovery.json'
+    if old_report is not None:
+        report.write_text(old_report, encoding='utf-8')
+    original = recovery.runner.versus
+
+    def run(config, output, provider, model, source):
+        assert (config, output, provider, model, source) == (cfg, tmp_path.parent, 'offline', 'fixture', None)
+        assert recovery.runner.versus is tolerate_holdout_failure
+
+    with patch.object(recovery.runner, 'run', side_effect=run) as execute:
+        recovery.recover(tmp_path)
+
+    execute.assert_called_once()
+    assert recovery.runner.versus is original
+    if old_report is None:
+        assert not report.exists()
+    else:
+        assert report.read_text(encoding='utf-8') == old_report
 
 
 class EvaluationRecoveryTests(unittest.TestCase):

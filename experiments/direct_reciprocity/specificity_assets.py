@@ -35,11 +35,6 @@ RANKS = (1, 3, 6)
 REPEATS = 20
 
 
-def tokenizer():
-    import tiktoken
-    return tiktoken.get_encoding('cl100k_base')
-
-
 def panel(split):
     """24 V opponents match 11 peers + 13 archive; H has 12 opponents.
 

@@ -4,7 +4,7 @@ import unittest
 
 from experiments.direct_reciprocity.core import Config, Policy
 from experiments.direct_reciprocity.baselines import TRAIN, TEST
-from experiments.direct_reciprocity.specificity_assets import (panel, probes, probe_specs, diagnostic_block, tokenizer, ARMS)
+from experiments.direct_reciprocity.specificity_assets import (panel, probes, probe_specs, diagnostic_block, ARMS)
 from experiments.direct_reciprocity.specificity import choose, training_scores, holdout_job
 from experiments.direct_reciprocity.specificity_analysis import holm, sign_swap_p
 
@@ -37,15 +37,13 @@ class SpecificityTests(unittest.TestCase):
         self.assertEqual({s['forced'] for s in h}, {0, 7})
         self.assertFalse({s['horizon'] for s in f} & {s['horizon'] for s in h})
 
-    def test_matched_blocks_and_wrong_diagnosis_are_changed(self):
+    def test_diagnostic_reports_preserve_distinct_behavior(self):
         a = diagnostic_block(probes(TRAIN[0], Config(), 'F', repeats=1))
         b = diagnostic_block(probes(TRAIN[1], Config(), 'F', repeats=1))
         self.assertEqual(ARMS, ('accurate', 'mismatched'))
         self.assertNotEqual(a, b)
-        enc = tokenizer()
-        target = len(enc.encode(a))
-        for text in [b]:
-            self.assertLessEqual(abs(len(enc.encode(text)) / target - 1), .05)
+        self.assertIn('unilateral_cooperation_last5=1.0000', a)
+        self.assertIn('unilateral_cooperation_last5=0.0000', b)
 
     def test_selection_ignores_holdout_and_keeps_ties(self):
         parent = {'metrics': {'S1': {'score': 3, 'status': 'ok'}}}

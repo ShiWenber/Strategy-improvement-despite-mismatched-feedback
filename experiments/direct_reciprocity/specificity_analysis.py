@@ -11,13 +11,19 @@ from .core import Policy
 from .records import read_json, write_json, population_root
 from .specificity import DEFAULT_ROOT, init_prompt, seal_selections
 from .specificity_assets import experiment_arms
+from .holdout_metrics import (PAYOFF_SETTINGS, SETTINGS, audit_deltas, availability,
+                              cluster_summary, delta_value, matched_contexts,
+                              missing_details, parent_available)
 
 
 def summarize(values):
     values = np.asarray(values, dtype=float)
     n = len(values)
     if not n:
-        raise ValueError('No independent clusters')
+        return {'n_seeds': 0, 'seed_values': [], 'mean': None, 'ci95': None,
+                'estimable': False}
+    if not np.isfinite(values).all():
+        raise ValueError('Population summary contains missing or nonfinite values')
     rng = np.random.default_rng(2026091903)
     boot = values[rng.integers(0, n, size=(20000, n))].mean(axis=1)
     return {'n_seeds': n, 'seed_values': values.tolist(), 'mean': float(values.mean()),
@@ -27,6 +33,8 @@ def summarize(values):
 def sign_swap_p(values):
     values = np.asarray(values, dtype=float)
     n = len(values)
+    if not n:
+        return None
     observed = abs(values.sum())
     indices = np.arange(1 << n, dtype=np.uint32)
     permuted = np.zeros(len(indices))
@@ -40,8 +48,8 @@ def contrast(values):
 
 
 def holm(ps):
-    ordered = sorted(ps, key=lambda key: ps[key])
-    adjusted, previous = {}, 0.
+    ordered = sorted((key for key in ps if ps[key] is not None), key=lambda key: ps[key])
+    adjusted, previous = {key: None for key in ps if ps[key] is None}, 0.
     for rank, key in enumerate(ordered):
         previous = max(previous, min(1., (len(ordered) - rank) * ps[key]))
         adjusted[key] = previous
@@ -78,17 +86,7 @@ def audit(root, manifest):
         if outcome.get('status', 'complete') != 'complete':
             skipped_holdouts.append({'id': job['id'], 'status': outcome.get('status'),
                                      'context': job['context']})
-            continue
-        if parent.get('status', 'complete') != 'complete':
-            issues.append(job['id'] + ': complete child has incomplete parent holdout')
-            continue
-        for setting in ('default', 'noise01', 'long'):
-            for metric in ('score', 'cooperation', 'worst_score'):
-                delta = outcome['deployed'][setting][metric] - parent['measured'][setting][metric]
-                if abs(delta - outcome['delta'][setting][metric]) > 1e-10:
-                    issues.append(job['id'] + ': delta mismatch')
-                if outcome['fallback'][setting] and abs(delta) > 1e-10:
-                    issues.append(job['id'] + ': fallback mismatch')
+        issues.extend(audit_deltas(outcome, parent, job['id']))
     selected = seal_selections(root, manifest, readonly=True)
     known = {j['id'] for j in manifest['jobs']}
     for r in selected['rows']:
@@ -97,21 +95,18 @@ def audit(root, manifest):
     result = {'issues': issues, 'n_requests': len(records),
             'statuses': dict(Counter(r['status'] for r in records)),
             'returned_models': dict(Counter(r.get('returned_model', 'missing') for r in records)),
-            'usage_missing': sum(r.get('usage') is None for r in records),
-            'total_tokens': sum((r.get('usage') or {}).get('total_tokens', 0) for r in records),
-            'prompt_tokens': sum((r.get('usage') or {}).get('prompt_tokens', 0) for r in records),
-            'completion_tokens': sum((r.get('usage') or {}).get('completion_tokens', 0) for r in records),
             'effective_mismatch_contexts': prompt_seal['effective_mismatch_contexts'],
             'skipped_holdouts': skipped_holdouts,
             'note': 'Record and arithmetic audit, not an independent replay of every game.'}
     if 'initial_source' in manifest:
-        new_records = records[len(manifest['init_jobs']):]
-        result.update(n_new_requests=len(new_records), n_reused_initial_requests=len(manifest['init_jobs']),
-                      new_total_tokens=sum((r.get('usage') or {}).get('total_tokens', 0) for r in new_records))
+        result.update(n_new_requests=len(records) - len(manifest['init_jobs']),
+                      n_reused_initial_requests=len(manifest['init_jobs']))
     return result
 
 
 def behavior_delta(row, parent):
+    if not parent_available(parent, 'behavior') or row.get('deployed', {}).get('behavior') is None:
+        return {}
     a = row['deployed']['behavior']['probes']
     b = parent['measured']['behavior']['probes']
     recovery = [k for k in a if 'TFT' in k or 'ALLC' in k]
@@ -127,82 +122,97 @@ def behavior_delta(row, parent):
     return result
 
 
+def selected_seed_gains(winners, by_id, seeds, setting):
+    """Include every selected-output slot, including retained parents at zero."""
+    return [mean(by_id[row['winner']]['delta'][setting]['score'] if row['winner'] is not None else 0.
+                 for row in winners if row['seed'] == seed)
+            for seed in seeds]
+
+
+def aggregate_holdouts(root, manifest, *, families=False, selection_metrics=False):
+    """Summarize each setting on shared evaluable contexts, without zero imputation."""
+    root = Path(root)
+    seeds = manifest['seeds']
+    rows = [read_json(root / 'holdout' / (job['id'] + '.json')) for job in manifest['jobs']]
+    if any(row.get('status', 'complete') != 'complete' for row in rows):
+        raise RuntimeError('Unrecovered holdouts remain; evaluate them before analysis')
+    by_id = {row['id']: row for row in rows}
+    parents = {cid: read_json(root / 'holdout' / (cid + '.json')) for cid in {row['context'] for row in rows}}
+    selected = read_json(root / 'SELECTIONS_SEALED.json')['rows']
+    eligible = {setting: matched_contexts(rows, setting) for setting in SETTINGS}
+    missing = {setting: missing_details(rows, setting) for setting in SETTINGS}
+    partial = any(len(contexts) != len(parents) for contexts in eligible.values())
+    for row in rows:
+        row['behavior_delta'] = behavior_delta(row, parents[row['context']])
+    behavior_keys = sorted({key for row in rows for key in row['behavior_delta']})
+    scores = ({identity: read_json(root / 'selection_scores' / (identity + '.json'))
+               for identity in list(by_id) + list(parents)} if selection_metrics else {})
+    raw, chosen = {}, {}
+    for arm in experiment_arms(manifest['arms']):
+        arm_rows = [row for row in rows if row['arm'] == arm]
+        metrics = {}
+        for setting in PAYOFF_SETTINGS:
+            for metric in ('score', 'cooperation', 'worst_score'):
+                metrics[setting + '/' + metric] = cluster_summary(
+                    arm_rows, seeds, lambda row, s=setting, k=metric: delta_value(row, s, k), summarize,
+                    contexts=eligible[setting], missing_reasons=missing[setting], include_metadata=partial)
+            if families:
+                for family in ('recovery', 'exploitation', 'random', 'memory'):
+                    metrics[setting + '/family:' + family] = cluster_summary(
+                        arm_rows, seeds, lambda row, s=setting, f=family:
+                        row['deployed'][s]['families'][f] - parents[row['context']]['measured'][s]['families'][f],
+                        summarize, contexts=eligible[setting], missing_reasons=missing[setting], include_metadata=partial)
+        behavior = {metric: cluster_summary(
+            arm_rows, seeds, lambda row, k=metric: row['behavior_delta'][k], summarize,
+            contexts=eligible['behavior'], missing_reasons=missing['behavior'], include_metadata=partial) for metric in behavior_keys}
+        if selection_metrics:
+            for rule in ('S1', 'S2', 'S3'):
+                def selection_gain(row):
+                    cell = scores[row['id']]['metrics'][rule]
+                    return (cell['score'] - scores[row['context']]['metrics'][rule]['score']
+                            if cell['status'] == 'ok' else 0.)
+                metrics['selection_metric/' + rule] = cluster_summary(arm_rows, seeds, selection_gain, summarize,
+                                                                      include_metadata=partial)
+        successful = [delta_value(row, 'default') for row in arm_rows
+                      if row['fallback'].get('default') is False and delta_value(row, 'default') is not None]
+        raw[arm] = {'n': len(arm_rows), 'valid': sum(row['valid'] for row in arm_rows),
+                    'fallbacks': {s: sum(row['fallback'].get(s) is True for row in arm_rows) for s in SETTINGS},
+                    'metrics': metrics, 'behavior': behavior}
+        if families or selection_metrics:
+            raw[arm].update(unchanged=sum(row['child'] is not None and Policy(**row['child']).key == row['parent_key'] for row in arm_rows),
+                            successful_only_default_gain=mean(successful) if successful else None)
+        for rule in ('S1', 'S2', 'S3'):
+            choices = [row for row in selected if row['arm'] == arm and row['rule'] == rule]
+            summaries = {}
+            for setting in PAYOFF_SETTINGS:
+                summaries[setting] = cluster_summary(
+                    choices, seeds, lambda row, s=setting:
+                    delta_value(by_id[row['winner']], s) if row['winner'] is not None else 0., summarize,
+                    contexts=eligible[setting], missing_reasons=missing[setting], include_metadata=partial)
+            chosen[rule + '/' + arm] = {
+                'accepted': sum(row['accepted'] for row in choices), 'n': len(choices), 'metrics': summaries}
+            if families or selection_metrics:
+                chosen[rule + '/' + arm]['accepted_default_degrades'] = sum(row['winner'] is not None
+                    and delta_value(by_id[row['winner']], 'default') is not None
+                    and delta_value(by_id[row['winner']], 'default') < 0 for row in choices)
+    report = {'raw': raw, 'selected': chosen}
+    if partial:
+        report['setting_availability'] = availability(rows, parents)
+    return report
+
+
 def analyze(root, output_suffix=""):
     root = Path(root)
     manifest = read_json(root / 'manifest.json')
     seeds = manifest['seeds']
     populations = population_root(root, manifest)
-    read_json(root / 'COMPLETE.json')
-    audit_result = audit(root, manifest)
-    write_json(root / f'AUDIT{output_suffix}.json', audit_result)
-    if audit_result['issues']:
-        raise RuntimeError('Audit failed; do not interpret incomplete or inconsistent results')
     all_rows = [read_json(root / 'holdout' / (j['id'] + '.json')) for j in manifest['jobs']]
-    rows = [r for r in all_rows if r.get('status', 'complete') == 'complete']
-    by_id = {r['id']: r for r in rows}
-    all_parents = {cid: read_json(root / 'holdout' / (cid + '.json'))
+    rows = all_rows
+    parents = {cid: read_json(root / 'holdout' / (cid + '.json'))
                    for cid in {r['context'] for r in all_rows}}
-    parents = {cid: r for cid, r in all_parents.items()
-               if r.get('status', 'complete') == 'complete'}
     selected = read_json(root / 'SELECTIONS_SEALED.json')['rows']
-    selection_scores = {identity: read_json(root / 'selection_scores' / (identity + '.json'))
-                        for identity in list(by_id) + list(parents)}
-    for row in rows:
-        if row['context'] in parents:
-            row['behavior_delta'] = behavior_delta(row, parents[row['context']])
-    raw, chosen = {}, {}
-    for arm in experiment_arms(manifest['arms']):
-        arm_rows = [r for r in rows if r['arm'] == arm]
-        metrics = {}
-        for setting in ('default', 'noise01', 'long'):
-            for metric in ('score', 'cooperation', 'worst_score'):
-                values = [mean(r['delta'][setting][metric] for r in arm_rows if r['seed'] == seed)
-                          for seed in seeds if any(r['seed'] == seed for r in arm_rows)]
-                metrics[setting + '/' + metric] = summarize(values)
-            for family in ('recovery', 'exploitation', 'random', 'memory'):
-                values = [mean(r['deployed'][setting]['families'][family] - parents[r['context']]['measured'][setting]['families'][family]
-                               for r in arm_rows if r['seed'] == seed and r['context'] in parents)
-                          for seed in seeds if any(r['seed'] == seed and r['context'] in parents for r in arm_rows)]
-                metrics[setting + '/family:' + family] = summarize(values)
-        behavior = {metric: summarize([mean(r['behavior_delta'][metric] for r in arm_rows
-                                             if r['seed'] == seed and 'behavior_delta' in r)
-                                       for seed in seeds
-                                       if any(r['seed'] == seed and 'behavior_delta' in r for r in arm_rows)])
-                    for metric in arm_rows[0]['behavior_delta']}
-        for rule in ('S1', 'S2', 'S3'):
-            values = []
-            for seed in seeds:
-                gains = []
-                for r in arm_rows:
-                    if r['seed'] != seed:
-                        continue
-                    item = selection_scores[r['id']]['metrics'][rule]
-                    baseline = selection_scores[r['context']]['metrics'][rule]['score']
-                    gains.append(item['score'] - baseline if item['status'] == 'ok' else 0.)
-                values.append(mean(gains))
-            metrics['selection_metric/' + rule] = summarize(values)
-        raw[arm] = {'n': len(arm_rows), 'valid': sum(r['valid'] for r in arm_rows),
-                    'unchanged': sum(r['child'] is not None and Policy(**r['child']).key == r['parent_key'] for r in arm_rows),
-                    'fallbacks': {s: sum(r['fallback'][s] for r in arm_rows) for s in ('default', 'noise01', 'long', 'behavior')},
-                    'metrics': metrics, 'behavior': behavior,
-                    'successful_only_default_gain': mean(r['delta']['default']['score'] for r in arm_rows if not r['fallback']['default'])
-                    if any(not r['fallback']['default'] for r in arm_rows) else None}
-        for rule in ('S1', 'S2', 'S3'):
-            winners = [r for r in selected if r['arm'] == arm and r['rule'] == rule]
-            sm = {}
-            for setting in ('default', 'noise01', 'long'):
-                values = []
-                for seed in seeds:
-                    available = [by_id[r['winner']]['delta'][setting]['score']
-                                 for r in winners
-                                 if r['seed'] == seed and r['winner'] in by_id]
-                    values.append(mean(available) if available else 0.)
-                sm[setting] = summarize(values)
-            chosen[rule + '/' + arm] = {
-                'accepted': sum(r['accepted'] for r in winners), 'n': len(winners), 'metrics': sm,
-                'accepted_default_degrades': sum(
-                    r['winner'] in by_id and by_id[r['winner']]['delta']['default']['score'] < 0
-                    for r in winners)}
+    aggregate = aggregate_holdouts(root, manifest, families=True, selection_metrics=True)
+    raw, chosen = aggregate['raw'], aggregate['selected']
     def raw_values(arm):
         return np.array(raw[arm]['metrics']['default/score']['seed_values'])
     def selected_values(rule, arm):
@@ -248,10 +258,12 @@ def analyze(root, output_suffix=""):
         items = {(r['context'], r['rule']): r['winner'] for r in selected if r['arm'] == arm}
         disagreements[arm] = {a + '-' + b: sum(items[cid, a] != items[cid, b] for cid in parents)
                               for a, b in [('S1', 'S2'), ('S2', 'S3'), ('S1', 'S3')]}
-    result = {'audit': audit_result, 'raw': raw, 'selected': chosen, 'primary': primary,
+    result = {'raw': raw, 'selected': chosen, 'primary': primary,
               'selection_disagreements': disagreements, 'parent_feature_associations_exploratory': associations,
               'parent_feature_interactions_exploratory': feature_effects,
               'note': f'{len(seeds)} independent population clusters. Original prespecified primary: Accurate versus Mismatched raw proposals. Selected outputs, behaviour and parent-feature associations are exploratory; CIs are unadjusted seed-bootstrap intervals.'}
+    if 'setting_availability' in aggregate:
+        result['setting_availability'] = aggregate['setting_availability']
     if len(seeds) == 1:
         result['note'] += ' Single-population API check: bootstrap intervals and sign-swap p-values are not evidence about the paper population.'
     write_json(root / f'ANALYSIS{output_suffix}.json', result)
@@ -261,7 +273,18 @@ def analyze(root, output_suffix=""):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('root', nargs='?', default=DEFAULT_ROOT)
-    parser.add_argument('--output-suffix', default='', help='Append to generated audit and analysis filenames.')
+    parser.add_argument('--output-suffix', default='', help='Append to the generated analysis filename.')
+    parser.add_argument('--audit-only', action='store_true', help='Run the optional record audit instead of analysis.')
+    parser.add_argument('--audit-output', type=Path, help='Explicit destination for the optional audit JSON.')
     args = parser.parse_args()
-    result = analyze(args.root, args.output_suffix)
-    print(json.dumps({'primary': result['primary'], 'audit': result['audit']}))
+    if args.audit_only:
+        if args.audit_output is None:
+            parser.error('--audit-only requires --audit-output')
+        result = audit(args.root, read_json(Path(args.root) / 'manifest.json'))
+        write_json(args.audit_output, result)
+        print(json.dumps(result))
+    else:
+        if args.audit_output is not None:
+            parser.error('--audit-output requires --audit-only')
+        result = analyze(args.root, args.output_suffix)
+        print(json.dumps({'primary': result['primary']}))

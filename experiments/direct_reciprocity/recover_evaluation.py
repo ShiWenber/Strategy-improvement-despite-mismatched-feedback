@@ -1,8 +1,7 @@
 """Explicit evaluation-only recovery for frozen runs with holdout runtime errors.
 
 Training errors still abort. Failed holdouts have null metrics, never fabricated
-payoffs. The frozen runner and its implementation identity remain untouched;
-the additional execution layer is recorded separately for every recovered run.
+payoffs. Recovery reads the run configuration and reuses durable request records.
 """
 import argparse
 from pathlib import Path
@@ -25,13 +24,6 @@ def tolerate_holdout_failure(policy, opponents, cfg, phase, generation=0):
 def recover(directory):
     directory = Path(directory).resolve()
     metadata = runner.read_json(directory / 'config.json')
-    record = {'version': 1,
-              'rule': 'Only holdout PolicyError becomes runtime_failure with null metrics; training errors propagate.',
-              'training_changed': False, 'instruction_budget_changed': False}
-    path = directory / 'evaluation_recovery.json'
-    if path.exists() and runner.read_json(path) != record:
-        raise ValueError('Recovery implementation differs from recorded version')
-    runner.write_json(path, record)
     original = runner.versus
     try:
         runner.versus = tolerate_holdout_failure

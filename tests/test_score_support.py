@@ -11,6 +11,11 @@ from experiments.direct_reciprocity.specificity import freeze
 from experiments.direct_reciprocity.specificity_assets import ARMS, SCORE_ARMS, experiment_arms, generation_arms
 
 
+@pytest.fixture(autouse=True)
+def configured_model(monkeypatch):
+    monkeypatch.setenv('DEEPSEEK_MODEL', 'offline-deepseek')
+
+
 def test_frozen_conditions_reject_silent_resume_with_another_budget(tmp_path):
     freeze(tmp_path, seeds=[901], ranks=[1], arms=ARMS)
     with pytest.raises(ValueError, match='conditions differ'):
