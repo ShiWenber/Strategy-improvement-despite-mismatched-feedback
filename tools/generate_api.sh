@@ -48,7 +48,7 @@ uv run python -m experiments.direct_reciprocity.qwen_analysis --root "$qwen_dir"
 # Downstream summaries and tables from the new records.
 uv run python -m experiments.direct_reciprocity.analyze_population --work "$workspace" --analysis-suffix _reproduct --output "$population_dir/population_summary_reproduct.json"
 uv run python -m experiments.direct_reciprocity.figures.analyze_opponent_profiles --work "$workspace" --analysis-suffix _reproduct --output "$workspace/results/figure4_opponent_profiles_20260926/ANALYSIS_reproduct.json"
-uv run python -m experiments.direct_reciprocity.figures.plot_behavior_evidence --work "$workspace" --analysis-suffix _reproduct --output "$population_dir/behavior/ANALYSIS_reproduct.json"
+uv run python -m experiments.direct_reciprocity.figures.plot_behavior_evidence --work "$workspace" --analysis-suffix _reproduct --off-root "$off_dir" --on-root "$on_dir" --output "$population_dir/behavior/ANALYSIS_reproduct.json"
 uv run python -m experiments.direct_reciprocity.mismatch_distance --root "$workspace" --output-suffix _reproduct
 uv run python -m experiments.direct_reciprocity.cross_model_summary --work "$workspace" --analysis-suffix _reproduct --output "$comparison_dir/cross_model_mainline_data_reproduct.json" --csv-dir "$comparison_dir" --output-suffix _reproduct
 uv run python -m experiments.direct_reciprocity.export_paper_tables --work "$workspace" --analysis-suffix _reproduct --output "$workspace/results/reproduction/tables" --output-suffix _reproduct

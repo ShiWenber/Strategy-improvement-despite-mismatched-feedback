@@ -20,7 +20,9 @@ def test_experiments_are_self_contained_with_one_native_entry_point():
                 assert not (node.module or '').startswith('tools'), path
             if isinstance(node, ast.Import):
                 assert not any(alias.name.startswith('tools') for alias in node.names), path
-    assert {p.name for p in (ROOT / 'tools').rglob('*.py')} == {'__init__.py', 'render_report.py'}
+    assert {p.name for p in (ROOT / 'tools').rglob('*.py')} == {
+        '__init__.py', 'render_report.py', 'reproduce.py', 'freeze_paper_snapshot.py',
+        'package_reproduction.py', 'run_fresh_reproduction.py', 'reproduction_status.py'}
     assert {p.name for p in (ROOT / 'tools').rglob('*.sh')} >= {'generate_api.sh', 'plot.sh'}
     assert not (ROOT / 'experiments/direct_reciprocity/generate_api.sh').exists()
     assert not (ROOT / 'experiments/direct_reciprocity/plot.sh').exists()

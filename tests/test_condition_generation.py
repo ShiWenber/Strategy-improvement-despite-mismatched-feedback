@@ -245,5 +245,5 @@ def test_shared_settings_preserve_all_archived_request_records(relative, provide
     root = Path(__file__).resolve().parents[1] / 'results' / relative
     for path in (root / 'requests_candidates').glob('*.json'):
         saved = json.loads(path.read_text(encoding='utf-8-sig'))
-        spec = generation.specification(saved['prompt'], provider, mode)
+        spec = generation.specification(saved['prompt'], provider, mode, model=saved['model'])
         assert all(saved[key] == value for key, value in spec.items())
